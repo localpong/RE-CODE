@@ -1,0 +1,134 @@
+<div class="tablet-container">
+  <div class="glass-screen" [class.critical-status]="(robotStatus.battery / robotStatus.maxBattery) * 100 < 20 || (robotStatus.hp / robotStatus.maxHp) * 100 < 20">
+    
+    <!-- Header -->
+    <div class="tablet-header">
+      <div class="sys-info">
+        <span class="pulse-icon"></span>
+        SYSTEM: GHOST-OS v1.0 | CONNECTION: STABLE | VAULT-07
+      </div>
+      <div class="project-name">PROJECT: RE-CODE</div>
+      <div class="time-display">SYS.TIME: {{ currentTime | date:'HH:mm:ss' }}</div>
+    </div>
+
+    <div class="tablet-content">
+      
+      <!-- Left Sidebar: Robot Status & Inventory -->
+      <app-robot-status 
+        class="sidebar-left"
+        [robotStatus]="robotStatus" 
+        (save)="saveGame()" 
+        (load)="loadGame()" 
+        (reset)="resetGame()">
+      </app-robot-status>
+
+      <!-- Center: 2.5D Radar Map -->
+      <div class="map-viewport" style="position: relative; overflow: hidden;">
+        <style>
+          @keyframes sweep {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+          }
+          @keyframes blink {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.3; transform: scale(0.6); }
+          }
+          @keyframes headlight-flicker {
+            0%, 93%, 100% { opacity: 0.8; }
+            94% { opacity: 0.2; }
+            96% { opacity: 0.9; }
+            97% { opacity: 0.1; }
+            98% { opacity: 0.8; }
+          }
+          @keyframes head-bobbing {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            25% { transform: translateY(-8px) rotate(-1.5deg); }
+            50% { transform: translateY(0px) rotate(0deg); }
+            75% { transform: translateY(-8px) rotate(1.5deg); }
+          }
+          .walking-anim {
+            animation: head-bobbing 0.4s infinite linear !important;
+          }
+        </style>
+        
+        <!-- ระบบพิกัดแผนที่ (Map Coordinates) -->
+        <div style="position: absolute; top: 15px; left: 15px; z-index: 10; color: #0ff; font-family: monospace; text-shadow: 0 0 5px #0ff; pointer-events: none; line-height: 1.5;">
+          <div style="font-size: 1.2em; font-weight: bold;">SECTOR-7 <span style="color: #aaa; font-size: 0.8em;">[WASTELAND]</span></div>
+          <div>COORD: X:{{ currentX | number:'1.2-2' }} Y:{{ currentY | number:'1.2-2' }}</div>
+          <div [style.color]="isProcessing ? '#0f0' : '#aaa'" style="margin-top: 5px;">
+            {{ isProcessing ? '> ROVING...' : '> STANDBY' }}
+            <span *ngIf="isAutoExploring" style="color: #ffaa00; margin-left: 10px; animation: blink 1s infinite;">[AUTO-MOVE]</span>
+            <span *ngIf="isAutoUpgrade" style="color: #00ff88; margin-left: 10px; animation: blink 1s infinite;">[AUTO-UPG]</span>
+            <span *ngIf="isAutoRecharge" style="color: #00fbff; margin-left: 10px; animation: blink 1s infinite;">[AUTO-CHG]</span>
+          </div>
+        </div>
+
+        <!-- กลุ่มปุ่มลัดอัตโนมัติ -->
+        <div class="auto-toggles">
+          <!-- ปุ่มลัดเปิด/ปิด Auto-Pilot -->
+          <button class="auto-pilot-btn" [class.active]="isAutoExploring" (click)="toggleAutoPilot()" [disabled]="isProcessing" title="เปิด/ปิดโหมดสำรวจอัตโนมัติ">
+            🤖 AUTO-MOVE: {{ isAutoExploring ? 'ON' : 'OFF' }}
+          </button>
+          <!-- ปุ่มลัดเปิด/ปิด Auto-Upgrade -->
+          <button class="auto-pilot-btn" [class.active]="isAutoUpgrade" (click)="toggleAutoUpgrade()" [disabled]="isProcessing" title="เปิด/ปิดอัปเกรดอัตโนมัติ">
+            🔧 AUTO-UPG: {{ isAutoUpgrade ? 'ON' : 'OFF' }}
+          </button>
+          <!-- ปุ่มลัดเปิด/ปิด Auto-Recharge -->
+          <button class="auto-pilot-btn" [class.active]="isAutoRecharge" (click)="toggleAutoRecharge()" [disabled]="isProcessing" title="เปิด/ปิดชาร์จแบตอัตโนมัติ">
+            ⚡ AUTO-CHG: {{ isAutoRecharge ? 'ON' : 'OFF' }}
+          </button>
+        </div>
+
+        <!-- เอฟเฟกต์ UI เรดาร์ซ้อนทับ (Hologram Overlay) -->
+        <div class="grid-overlay" style="pointer-events: none; z-index: 2;"></div>
+        <div class="radar-scan" style="pointer-events: none; z-index: 2;"></div>
+
+        <!-- เอาไฟฉายออกตามรีเควสต์ -->
+
+        <!-- นำเข้า Component World View (3D) ใหม่ -->
+        <app-world-view style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; z-index: 1;" [currentX]="currentX" [currentY]="currentY" [currentZ]="currentZ" [mapRotation]="mapRotation" [radarBlips]="radarBlips" [environmentObjects]="environmentObjects" [isWalking]="isWalking"></app-world-view>
+
+        <!-- Photo Overlay (แสดงกรอบรูปจำลองเมื่อสั่งถ่ายรูป) -->
+        <div *ngIf="isShowingPhoto" class="photo-overlay">
+          <div class="photo-frame">
+            <div class="scanline"></div>
+            <div class="rec-indicator"><span>REC</span></div>
+            <div class="photo-content">
+              <span style="color: #fff; font-size: 0.8em; letter-spacing: 2px;">[ IMAGE_DATA_RENDERED ]</span>
+              <br><br>
+              <pre style="color: #0f0; font-family: monospace; font-size: 1.3em; line-height: 1.2; margin: 0; text-shadow: 0 0 5px #0f0;">{{ currentPhotoAscii }}</pre>
+              <br>
+              <span style="color: #0f0; font-size: 1.1em; text-shadow: 0 0 5px #0f0;">{{ currentPhotoScene }}</span>
+              <br><br>
+              <span style="color: #0ff; font-size: 0.9em;">COORD: X:{{ currentX | number:'1.2-2' }} Y:{{ currentY | number:'1.2-2' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- D-Pad (On-screen Controls) สำหรับมือถือและเมาส์ -->
+        <div class="d-pad">
+          <button class="d-btn up" (mousedown)="pressedKeys.add('w')" (mouseup)="pressedKeys.delete('w')" (mouseleave)="pressedKeys.delete('w')" (touchstart)="pressedKeys.add('w')" (touchend)="pressedKeys.delete('w')" title="เดินหน้า">▲</button>
+          <div class="d-pad-middle">
+            <button class="d-btn left" (mousedown)="pressedKeys.add('a')" (mouseup)="pressedKeys.delete('a')" (mouseleave)="pressedKeys.delete('a')" (touchstart)="pressedKeys.add('a')" (touchend)="pressedKeys.delete('a')" title="เดินซ้าย">◀</button>
+            <button class="d-btn down" (mousedown)="pressedKeys.add('s')" (mouseup)="pressedKeys.delete('s')" (mouseleave)="pressedKeys.delete('s')" (touchstart)="pressedKeys.add('s')" (touchend)="pressedKeys.delete('s')" title="ถอยหลัง">▼</button>
+            <button class="d-btn right" (mousedown)="pressedKeys.add('d')" (mouseup)="pressedKeys.delete('d')" (mouseleave)="pressedKeys.delete('d')" (touchstart)="pressedKeys.add('d')" (touchend)="pressedKeys.delete('d')" title="เดินขวา">▶</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Sidebar: GHOST-OS Terminal -->
+      <app-ai-terminal
+        class="sidebar-right"
+        [currentAiFace]="currentAiFace"
+        [chatHistory]="chatHistory"
+        [isProcessing]="isProcessing"
+        [isListening]="isListening"
+        [(userCommand)]="userCommand"
+        (commandEntered)="sendCommand()"
+        (toggleListen)="toggleListening()"
+        (stopAudio)="stopSpeaking()">
+      </app-ai-terminal>
+      
+    </div>
+  </div>
+</div>

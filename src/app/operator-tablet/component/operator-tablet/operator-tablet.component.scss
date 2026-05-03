@@ -1,0 +1,795 @@
+$cyan: #00fbff;
+$magenta: #ff00ff;
+$glass-bg: rgba(0, 20, 30, 0.4);
+$glass-border: rgba(0, 251, 255, 0.2);
+
+.tablet-container {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #050505;
+  overflow: hidden;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.glass-screen {
+  width: 95%;
+  height: 90%;
+  background: $glass-bg;
+  backdrop-filter: blur(15px); // หัวใจของจอกระจก
+  border: 1px solid $glass-border;
+  border-radius: 30px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(0, 251, 255, 0.05);
+  position: relative;
+  overflow: hidden;
+}
+
+.tablet-header {
+  height: 50px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 30px;
+  border-bottom: 1px solid $glass-border;
+  font-size: 0.8rem;
+  letter-spacing: 2px;
+  color: $cyan;
+  text-shadow: 0 0 10px $cyan;
+}
+
+.tablet-content {
+  flex: 1;
+  display: flex;
+  padding: 20px;
+  gap: 20px;
+  min-height: 0; // ป้องกัน Content ดันจนทะลุกรอบ
+}
+
+.map-viewport {
+  flex: 2;
+  border: 1px solid rgba($cyan, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+  position: relative;
+  border-radius: 15px;
+  overflow: hidden;
+
+  .grid-overlay {
+    position: absolute;
+    width: 200%; height: 200%;
+    top: -50%; left: -50%;
+    background-image: 
+      linear-gradient(rgba($cyan, 0.1) 1px, transparent 1px),
+      linear-gradient(90deg, rgba($cyan, 0.1) 1px, transparent 1px);
+    background-size: 50px 50px;
+    transform: perspective(500px) rotateX(60deg); // ทำเป็น 2.5D หลอกๆ
+  }
+
+  .radar-scan {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 200px; height: 200px;
+    margin: -100px 0 0 -100px;
+    border-radius: 50%;
+    border: 1px solid rgba($cyan, 0.5);
+    box-shadow: 0 0 20px rgba($cyan, 0.3);
+    animation: radar-pulse 3s infinite linear;
+    transform: perspective(500px) rotateX(60deg);
+  }
+
+  // องค์ประกอบแผนที่ตามเนื้อเรื่อง (Story Elements)
+  .danger-zone {
+    position: absolute;
+    background: radial-gradient(circle, rgba(255, 0, 85, 0.2) 0%, transparent 70%);
+    border: 1px dashed #ff0055;
+    border-radius: 50%;
+    animation: pulse-danger 2s infinite;
+    z-index: 5;
+    transform: perspective(500px) rotateX(60deg); // ทำให้แบนไปกับพื้นตามกริด
+  }
+
+  .objective-marker {
+    position: absolute;
+    width: 15px;
+    height: 15px;
+    border: 2px solid #ffaa00;
+    transform: translate(-50%, -50%) rotate(45deg);
+    box-shadow: 0 0 10px #ffaa00, inset 0 0 5px #ffaa00;
+    z-index: 6;
+    animation: pulse 1.5s infinite;
+  }
+
+  .poi-label {
+    position: absolute;
+    color: $cyan;
+    font-size: 0.7rem;
+    font-family: 'Courier New', Courier, monospace;
+    text-shadow: 0 0 5px $cyan;
+    background: rgba(0, 20, 30, 0.6);
+    padding: 2px 6px;
+    border: 1px solid rgba($cyan, 0.3);
+    border-radius: 3px;
+    z-index: 7;
+  }
+
+  // สิ่งกีดขวางแบบเตี้ย (บันได, ท่อนไม้ - ปีนข้ามได้)
+  .obstacle-wall {
+    position: absolute;
+    background: repeating-linear-gradient(45deg, rgba(150, 150, 150, 0.2) 0, rgba(150, 150, 150, 0.2) 5px, rgba(80, 80, 80, 0.4) 5px, rgba(80, 80, 80, 0.4) 10px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.5), inset 0 2px 2px rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    z-index: 4;
+    transform: perspective(500px) rotateX(60deg) rotate(var(--rot, 0deg)); // ใช้ --rot เพื่อปรับองศาใน HTML
+  }
+
+  // โซนแม่น้ำ (ส่งผลให้ล้อฝืด/กินพลังงานมากขึ้น)
+  .water-zone {
+    position: absolute;
+    border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%; // ทำให้ดูเหมือนเป็นแอ่งน้ำธรรมชาติ
+    animation: water-ripple 4s ease-in-out infinite alternate;
+    z-index: 2;
+    transform: perspective(500px) rotateX(60deg) rotate(var(--rot, 0deg));
+    box-shadow: inset 0 0 20px rgba(0, 150, 255, 0.3);
+    
+    &.shallow { background: rgba(0, 200, 255, 0.15); border: 1px dashed rgba(0, 200, 255, 0.3); }
+    
+    &.deep { background: rgba(0, 100, 255, 0.3); border: 1px solid rgba(0, 100, 255, 0.5); }
+  }
+}
+
+.sidebar-left, .sidebar-right {
+  flex: 0.7;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; // ป้องกัน Content ดันจนทะลุกรอบ
+}
+
+.widget-box, .ai-assistant-box {
+  background: rgba($cyan, 0.05);
+  border: 1px solid $glass-border;
+  border-radius: 15px;
+  padding: 15px;
+  height: 100%;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; // ป้องกัน Content ดันจนทะลุกรอบ
+
+  h3 {
+    color: $cyan;
+    font-size: 0.9rem;
+    letter-spacing: 1px;
+    margin-top: 0;
+  }
+}
+
+// เพิ่มให้ฝั่งซ้ายเลื่อนได้ด้วย ป้องกันเมนูเยอะจนทะลุจอ
+.widget-box {
+  overflow-y: auto;
+  padding-right: 5px; // เว้นระยะห่างไม่ให้เนื้อหาชิดแถบเลื่อนเกินไป
+
+  // Custom Scrollbar ให้เข้ากับธีม Cyberpunk
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 251, 255, 0.3);
+    border-radius: 3px;
+    border: 1px solid $glass-border;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 251, 255, 0.6);
+    box-shadow: 0 0 10px $cyan;
+  }
+}
+
+.ai-face-container {
+  text-align: center;
+  margin-bottom: 15px;
+  padding: 10px;
+  background: rgba(0, 20, 30, 0.6);
+  border: 1px dashed $cyan;
+  border-radius: 10px;
+  box-shadow: inset 0 0 10px rgba(0, 251, 255, 0.1);
+}
+
+.ascii-face {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 1.2rem;
+  line-height: 1.2;
+  color: $cyan;
+  text-shadow: 0 0 5px $cyan;
+  margin: 0;
+}
+
+.ai-chat-log {
+  flex: 1;
+  min-height: 0; // ป้องกันบัคแชททะลุกรอบในบราวเซอร์บางตัว
+  overflow-y: scroll; // บังคับให้แสดง Scrollbar ตลอดเวลา
+  font-size: 0.9rem;
+  margin-bottom: 10px;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 5px; // เว้นระยะห่างข้อความไม่ให้ชิดแถบเลื่อนจนเกินไป
+  
+  div {
+    word-break: break-word; // ตัดคำที่ยาวเกินไปป้องกันข้อความล้นจอ
+    white-space: pre-wrap; // คงรูปแบบการเว้นบรรทัดไว้
+    line-height: 1.4;
+  }
+
+  .ai { color: $cyan; }
+  .user { color: $magenta; }
+
+  .role-badge {
+    font-weight: bold;
+    margin-right: 5px;
+  }
+
+  // Custom Scrollbar ให้เข้ากับธีม Cyberpunk
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 251, 255, 0.3);
+    border-radius: 3px;
+    border: 1px solid $glass-border;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 251, 255, 0.6);
+    box-shadow: 0 0 10px $cyan;
+  }
+}
+
+.chat-input-area {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+
+  .mic-btn, .stop-audio-btn {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid $cyan;
+    color: #fff;
+    border-radius: 5px;
+    padding: 10px 20px;
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+
+  .stop-audio-btn {
+    border-color: $magenta;
+    color: $magenta;
+    &:hover {
+      background: rgba(255, 0, 255, 0.3);
+      box-shadow: 0 0 10px rgba(255, 0, 255, 0.5), inset 0 0 5px rgba(255, 0, 255, 0.3);
+    }
+  }
+
+  .mic-btn {
+    &.listening {
+      background: $magenta;
+      border-color: $magenta;
+      animation: pulse 1s infinite;
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      background: rgba(0, 0, 0, 0.5);
+      border-color: rgba(255, 255, 255, 0.2);
+      color: rgba(255, 255, 255, 0.2);
+    }
+  }
+
+  input {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid $cyan;
+    color: #fff;
+    padding: 10px;
+    border-radius: 5px;
+    outline: none;
+    box-shadow: inset 0 0 5px $cyan;
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba($cyan, 0.2);
+  border-top-color: $cyan;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  flex-shrink: 0;
+}
+
+.action-btn {
+  width: 100%;
+  background: rgba(255, 170, 0, 0.1);
+  border: 1px solid #ffaa00;
+  color: #ffaa00;
+  padding: 8px;
+  margin-top: 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.3s;
+  text-shadow: 0 0 5px #ffaa00;
+
+  &:hover:not(:disabled) {
+    background: rgba(255, 170, 0, 0.3);
+    box-shadow: 0 0 10px rgba(255, 170, 0, 0.5), inset 0 0 10px rgba(255, 170, 0, 0.4);
+  }
+
+  &:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    filter: grayscale(100%);
+  }
+}
+
+.repair-btn {
+  background: rgba(255, 0, 100, 0.1);
+  border: 1px solid #ff0066;
+  color: #ff0066;
+  text-shadow: 0 0 5px #ff0066;
+
+  &:hover:not(:disabled) {
+    background: rgba(255, 0, 100, 0.3);
+    box-shadow: 0 0 10px rgba(255, 0, 100, 0.5), inset 0 0 10px rgba(255, 0, 100, 0.4);
+  }
+}
+
+.summarize-btn {
+  background: rgba(180, 0, 255, 0.1);
+  border: 1px solid #b400ff;
+  color: #b400ff;
+  text-shadow: 0 0 5px #b400ff;
+
+  &:hover:not(:disabled) {
+    background: rgba(180, 0, 255, 0.3);
+    box-shadow: 0 0 10px rgba(180, 0, 255, 0.5), inset 0 0 10px rgba(180, 0, 255, 0.4);
+  }
+}
+
+.upgrade-btn {
+  width: 100%;
+  background: rgba(0, 255, 136, 0.1);
+  border: 1px solid #00ff88;
+  color: #00ff88;
+  padding: 8px;
+  border-radius: 5px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.3s;
+  text-shadow: 0 0 5px #00ff88;
+
+  small { font-weight: normal; font-size: 0.75rem; }
+
+  &:hover:not(:disabled) {
+    background: rgba(0, 255, 136, 0.3);
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.5), inset 0 0 10px rgba(0, 255, 136, 0.4);
+  }
+
+  &:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    filter: grayscale(100%);
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.quest-title {
+  color: #ffaa00 !important;
+  text-shadow: 0 0 5px #ffaa00;
+}
+
+.quest-btn {
+  width: 100%;
+  background: rgba(255, 215, 0, 0.1);
+  border: 1px solid #ffd700;
+  color: #ffd700;
+  padding: 10px;
+  border-radius: 5px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.3s;
+  text-shadow: 0 0 5px #ffd700;
+
+  small { font-weight: normal; font-size: 0.75rem; }
+
+  &:hover:not(:disabled) {
+    background: rgba(255, 215, 0, 0.3);
+    box-shadow: 0 0 15px rgba(255, 215, 0, 0.6), inset 0 0 10px rgba(255, 215, 0, 0.4);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    filter: grayscale(80%);
+  }
+}
+
+.system-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 5px;
+}
+
+.sys-btn {
+  flex: 1;
+  background: rgba(0, 251, 255, 0.1);
+  border: 1px solid $cyan;
+  color: $cyan;
+  padding: 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.3s;
+  font-size: 0.75rem;
+
+  &:hover {
+    background: rgba(0, 251, 255, 0.3);
+    box-shadow: 0 0 10px rgba(0, 251, 255, 0.5), inset 0 0 5px rgba(0, 251, 255, 0.3);
+  }
+  
+  &.danger-btn {
+    border-color: #ff0055;
+    color: #ff0055;
+    background: rgba(255, 0, 85, 0.1);
+    
+    &:hover {
+      background: rgba(255, 0, 85, 0.3);
+      box-shadow: 0 0 10px rgba(255, 0, 85, 0.5), inset 0 0 5px rgba(255, 0, 85, 0.3);
+    }
+  }
+}
+
+// Animation สำหรับระบบทำงาน
+.pulse-icon {
+  display: inline-block;
+  width: 10px; height: 10px;
+  background: $cyan;
+  border-radius: 50%;
+  margin-right: 10px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.3; }
+  100% { opacity: 1; }
+}
+
+@keyframes radar-pulse {
+  0% { transform: perspective(500px) rotateX(60deg) scale(0.1); opacity: 1; }
+  100% { transform: perspective(500px) rotateX(60deg) scale(2); opacity: 0; }
+}
+
+@keyframes water-ripple {
+  0% { border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%; }
+  100% { border-radius: 60% 40% 30% 70% / 60% 50% 40% 50%; }
+}
+
+@keyframes pulse-danger {
+  0% { opacity: 0.5; transform: perspective(500px) rotateX(60deg) scale(0.95); }
+  50% { opacity: 1; transform: perspective(500px) rotateX(60deg) scale(1.05); box-shadow: 0 0 20px rgba(255, 0, 85, 0.4); }
+  100% { opacity: 0.5; transform: perspective(500px) rotateX(60deg) scale(0.95); }
+}
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 0.8rem;
+
+  span {
+    width: 40px;
+  }
+
+  .progress-bar {
+    flex: 1;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+
+    .fill {
+      height: 100%;
+      &.hp { background: #00ff88; box-shadow: 0 0 5px #00ff88; }
+      &.battery { background: #ffaa00; box-shadow: 0 0 5px #ffaa00; }
+    }
+  }
+}
+
+.neon-line {
+  border: 0;
+  height: 1px;
+  background: $glass-border;
+  margin: 15px 0;
+  box-shadow: 0 0 5px $cyan;
+}
+
+.cyan-text {
+  color: $cyan;
+}
+
+// Badge ไอเทมเฉพาะทาง
+.badge {
+  background: rgba(0, 251, 255, 0.1);
+  border: 1px solid rgba(0, 251, 255, 0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: $cyan;
+}
+
+// เอฟเฟกต์หน้าจอสั่นและเปลี่ยนสีขอบเป็นสีแดงเมื่อสถานะวิกฤต (HP หรือ แบตเตอรี่ < 20%)
+.critical-status {
+  animation: screen-shake 0.3s infinite;
+  box-shadow: 0 0 50px rgba(255, 0, 0, 0.4), inset 0 0 30px rgba(255, 0, 0, 0.2) !important;
+  border: 1px solid rgba(255, 0, 0, 0.5) !important;
+}
+
+@keyframes screen-shake {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(1px, -1px); }
+  50% { transform: translate(-1px, 1px); }
+  75% { transform: translate(-1px, -1px); }
+  100% { transform: translate(1px, 1px); }
+}
+
+// On-screen D-Pad
+.d-pad {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 20;
+
+  .d-btn {
+    background: rgba(0, 251, 255, 0.1);
+    border: 1px solid $cyan;
+    color: $cyan;
+    width: 45px;
+    height: 45px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1.2rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: all 0.2s;
+    margin: 3px;
+    text-shadow: 0 0 5px $cyan;
+    box-shadow: inset 0 0 5px rgba(0, 251, 255, 0.2);
+
+    &:hover:not(:disabled) {
+      background: rgba(0, 251, 255, 0.3);
+      box-shadow: 0 0 10px $cyan, inset 0 0 10px rgba(0, 251, 255, 0.5);
+    }
+    
+    &:active:not(:disabled) {
+      background: $cyan;
+      color: #000;
+    }
+
+    &:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+  }
+
+  .d-pad-middle {
+    display: flex;
+    justify-content: center;
+  }
+}
+
+// กลุ่มปุ่มลัดอัตโนมัติ
+.auto-toggles {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 20;
+}
+
+// Auto-Pilot Button
+.auto-pilot-btn {
+  background: rgba(0, 251, 255, 0.1);
+  border: 1px solid $cyan;
+  color: $cyan;
+  padding: 6px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: bold;
+  z-index: 20;
+  transition: all 0.3s;
+  text-shadow: 0 0 5px $cyan;
+  box-shadow: inset 0 0 5px rgba(0, 251, 255, 0.2);
+
+  &:hover:not(:disabled) {
+    background: rgba(0, 251, 255, 0.3);
+    box-shadow: 0 0 10px $cyan, inset 0 0 10px rgba(0, 251, 255, 0.5);
+  }
+
+  &.active {
+    background: rgba(255, 170, 0, 0.2);
+    border-color: #ffaa00;
+    color: #ffaa00;
+    text-shadow: 0 0 5px #ffaa00;
+    box-shadow: 0 0 10px #ffaa00, inset 0 0 10px rgba(255, 170, 0, 0.2);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+// Photo Overlay
+.photo-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 5, 10, 0.85);
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  animation: static-flicker 0.2s infinite;
+  
+  .photo-frame {
+    width: 85%;
+    height: 85%;
+    border: 2px solid $cyan;
+    position: relative;
+    background: repeating-linear-gradient(0deg, rgba(0, 251, 255, 0.05), rgba(0, 251, 255, 0.05) 2px, transparent 2px, transparent 4px);
+    box-shadow: 0 0 30px rgba(0, 251, 255, 0.2), inset 0 0 30px rgba(0, 251, 255, 0.2);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    border-radius: 10px;
+
+    .rec-indicator {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      color: #ff0055;
+      font-weight: bold;
+      font-size: 1.2rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-shadow: 0 0 8px #ff0055;
+      
+      &::before {
+        content: '';
+        display: block;
+        width: 14px;
+        height: 14px;
+        background: #ff0055;
+        border-radius: 50%;
+        animation: pulse 1s infinite;
+      }
+    }
+
+    .photo-content {
+      text-align: center;
+      font-family: 'Courier New', Courier, monospace;
+      z-index: 2;
+    }
+
+    .scanline {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 10px;
+      background: rgba(0, 251, 255, 0.3);
+      box-shadow: 0 0 10px rgba(0, 251, 255, 0.5);
+      opacity: 0.6;
+      animation: scanline-anim 3s linear infinite;
+      z-index: 1;
+    }
+  }
+}
+
+@keyframes scanline-anim {
+  0% { top: -10%; }
+  100% { top: 110%; }
+}
+
+@keyframes static-flicker {
+  0% { opacity: 0.95; }
+  50% { opacity: 0.85; }
+  100% { opacity: 0.95; }
+}
+
+// Responsive Design for Mobile
+@media (max-width: 992px) {
+  .tablet-content {
+    flex-direction: column;
+    overflow-y: auto; // อนุญาตให้เลื่อนได้เมื่อจัดเรียงแนวตั้ง
+    padding: 10px;
+  }
+
+  .sidebar-left {
+    order: 1; // ให้อยู่บนสุด
+    flex: none;
+    min-height: max-content;
+  }
+
+  .map-viewport {
+    order: 2;
+    flex: none;
+    height: 50vh; // ให้แผนที่ใช้พื้นที่ 50% ของจอ
+    min-height: 300px;
+  }
+
+  .sidebar-right {
+    order: 3;
+    flex: none;
+    height: 400px; // กำหนดความสูงให้ Terminal
+  }
+
+  .d-pad {
+    bottom: 10px;
+    right: 10px;
+    transform: scale(0.8); // ย่อขนาด D-Pad ลงนิดหน่อย
+    transform-origin: bottom right;
+  }
+}
+
+@media (max-width: 480px) {
+  .tablet-header {
+    flex-direction: column;
+    height: auto;
+    padding: 10px;
+    gap: 5px;
+    text-align: center;
+  }
+
+  .map-viewport {
+    height: 40vh;
+  }
+  
+  .glass-screen {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    border: none;
+  }
+}
