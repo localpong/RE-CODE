@@ -1,0 +1,66 @@
+<div class="widget-box">
+  <h3>HOME-PAL 01 (OBSOLETE) STATUS</h3>
+  <div class="stat-row">
+    <span>HP</span>
+    <div class="progress-bar"><div class="fill hp" [style.width.%]="(robotStatus.hp / robotStatus.maxHp) * 100"></div></div>
+  </div>
+  <div class="stat-row">
+    <span>PWR</span>
+    <div class="progress-bar"><div class="fill battery" [style.width.%]="(robotStatus.battery / robotStatus.maxBattery) * 100"></div></div>
+  </div>
+  
+  <hr class="neon-line">
+  
+  <h3>INVENTORY CACHE</h3>
+  <p>Scrap (เหล็ก): <span class="cyan-text">{{ robotStatus.inventory.scrap }} unit</span></p>
+  <p>Chips (ชิป): <span class="cyan-text">{{ robotStatus.inventory.chips }} unit</span></p>
+  
+  <div style="font-size: 0.75em; color: #ddd; display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px;">
+    <span *ngIf="robotStatus.inventory.cameras > 0" class="badge">📷 Camera: {{ robotStatus.inventory.cameras }}</span>
+    <span *ngIf="robotStatus.inventory.solarPanels > 0" class="badge">☀️ Solar: {{ robotStatus.inventory.solarPanels }}</span>
+    <span *ngIf="robotStatus.inventory.batteries > 0" class="badge">🔋 Old Bat: {{ robotStatus.inventory.batteries }}</span>
+    <span *ngIf="robotStatus.inventory.phones > 0" class="badge">📱 Phone: {{ robotStatus.inventory.phones }}</span>
+    <span *ngIf="robotStatus.inventory.photos && robotStatus.inventory.photos.length > 0" class="badge">🖼️ Photos: {{ robotStatus.inventory.photos.length }}</span>
+  </div>
+
+  <hr class="neon-line">
+  <h3>VOICE / TEXT COMMANDS</h3>
+  <div style="font-size: 0.8em; color: #aaa; margin-bottom: 10px; line-height: 1.4;">
+    <span style="color: #0ff;">[!]</span> ปุ่มแมนนวลเสียหาย สั่งการผ่าน GHOST-OS:<br>
+  - <span style="color: #0ff;">"เดินหน้า/ถอยหลัง/หมุนซ้าย/หมุนขวา"</span> (Move / ปุ่ม WASD)<br>
+  - <span style="color: #0ff;">"เดินหาของเอง" / "หยุด"</span> (Auto Explore / Stop)<br>
+  - <span style="color: #0ff;">"ชาร์จแบต"</span> (Recharge)<br>
+  - <span style="color: #0ff;">"ซ่อมแซม"</span> (Repair - 2 Scrap)<br>
+  - <span style="color: #0ff;">"อัปเกรด/ติดตั้ง/เพิ่ม [เกราะ/แบต/ไลดาร์/มอเตอร์/กล้อง/โซลาร์]"</span><br>
+  - <span style="color: #0ff;">"ถ่ายรูป" / "ดูรูป"</span> (ถ้ามีกล้อง)<br>
+  - <span style="color: #0ff;">"สร้างเครื่องฟอกอากาศ"</span> (Build Purifier)
+  </div>
+  <ul style="list-style: none; padding: 0; font-size: 0.85em; line-height: 1.8; color: #ddd;">
+    <li>🛡️ <strong>เกราะ (Armor)</strong> <span style="color:#0ff; float:right;">Lv.{{ (robotStatus.maxHp - 80) / 20 }}</span></li>
+    <li>🔋 <strong>แบตเตอรี่ (Battery)</strong> <span style="color:#0ff; float:right;">Lv.{{ (robotStatus.maxBattery - 80) / 20 }}</span></li>
+    <li>📡 <strong>เซนเซอร์ (LIDAR)</strong> <span style="color:#0ff; float:right;">Lv.{{ robotStatus.scavengingLevel }}</span></li>
+    <li>⚙️ <strong>มอเตอร์ประหยัด (Motor)</strong> <span style="color:#0ff; float:right;">Lv.{{ robotStatus.efficiencyLevel }}</span></li>
+    <li>📷 <strong>กล้องถ่ายภาพ (Camera)</strong> <span [style.color]="robotStatus.hasCamera ? '#0ff' : '#f00'" style="float:right;">{{ robotStatus.hasCamera ? 'Ready' : 'Broken' }}</span></li>
+    <li>☀️ <strong>โซลาร์เซลล์ (Solar)</strong> <span style="color:#0ff; float:right;">Lv.{{ robotStatus.solarLevel }}</span></li>
+  </ul>
+  
+  <hr class="neon-line">
+  <h3 class="quest-title">MAIN QUEST</h3>
+  <div *ngIf="!robotStatus.isPurifierCrafted" style="font-size: 0.85em; color: #ddd; line-height: 1.6; background: rgba(0,255,255,0.05); padding: 10px; border-left: 2px solid #0ff;">
+    เป้าหมาย: สร้าง <span style="color: #0ff;">Atmospheric Purifier</span><br>
+    ทรัพยากร: Scrap <span [style.color]="robotStatus.inventory.scrap >= 20 ? '#0f0' : '#f00'">{{ robotStatus.inventory.scrap }}/20</span>, 
+    Chips <span [style.color]="robotStatus.inventory.chips >= 5 ? '#0f0' : '#f00'">{{ robotStatus.inventory.chips }}/5</span><br>
+    คำสั่ง: <span style="color: #0ff;">"สร้างเครื่องฟอกอากาศ"</span>
+  </div>
+  <div *ngIf="robotStatus.isPurifierCrafted" style="font-size: 0.9em; color: #0f0; line-height: 1.6; text-align: center; padding: 10px; border: 1px solid #0f0; background: rgba(0,255,0,0.1);">
+    🎉 PURIFIER ACTIVE! (MISSION CLEAR)
+  </div>
+  
+  <hr class="neon-line">
+  <h3>SYSTEM MENU</h3>
+  <div class="system-buttons">
+    <button class="sys-btn" (click)="onSave()">💾 SAVE</button>
+    <button class="sys-btn" (click)="onLoad()">📂 LOAD</button>
+    <button class="sys-btn danger-btn" (click)="onReset()">🗑️ RESET</button>
+  </div>
+</div>

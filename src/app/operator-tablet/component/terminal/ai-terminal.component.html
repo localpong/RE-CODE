@@ -1,0 +1,20 @@
+<div class="ai-assistant-box">
+  <div class="ai-face-container">
+    <pre class="ascii-face">{{ currentAiFace }}</pre>
+  </div>
+  <div class="ai-chat-log" #chatLog>
+    <div *ngFor="let chat of chatHistory" [ngClass]="chat.role">
+      <span class="role-badge">[{{ chat.role | uppercase }}]</span> {{ chat.text }}
+    </div>
+  </div>
+  <div class="chat-input-area">
+    <button class="mic-btn" [class.listening]="isListening" (click)="onToggleListen()" [disabled]="isProcessing" title="เปิด/ปิดไมค์">
+      🎤
+    </button>
+    <button class="stop-audio-btn" (click)="onStopAudio()" title="หยุดเสียงพูด">
+      🔇
+    </button>
+    <input type="text" [ngModel]="userCommand" (ngModelChange)="onCommandChange($event)" (keyup.enter)="onEnter()" [disabled]="isProcessing" [placeholder]="isProcessing ? '> Processing...' : '> Awaiting Input...'">
+    <div class="loading-spinner" *ngIf="isProcessing"></div>
+  </div>
+</div>

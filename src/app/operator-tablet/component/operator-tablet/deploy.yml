@@ -1,0 +1,38 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main # Set this to your default branch (e.g., main, master)
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout 🛎️
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '24' # Use a Node.js version compatible with your Angular project
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Angular app
+        # Replace 'RE-CODE' in --base-href=/RE-CODE/ with your GitHub repository name
+        # GitHub Pages serves from a subpath like https://<username>.github.io/<repository-name>/
+        # The --configuration production flag ensures an optimized build.
+        run: npm run build -- --base-href=/RE-CODE/ --configuration production
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # The publish_dir should match the output path of your Angular build.
+          # By default, for an Angular CLI project, this is usually 'dist/<your-project-name>'.
+          # Check your angular.json file under "architect" -> "build" -> "options" -> "outputPath"
+          publish_dir: ./dist/re-code # Adjust 're-code' if your Angular project name is different
+          publish_branch: gh-pages # This is the branch where the built assets will be pushed

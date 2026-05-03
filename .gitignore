@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.angular/
+*.log
+.DS_Store
+.env
+.vscode
+.idea
+src/environments/environment.ts
+src/environments/environment.prod.ts
