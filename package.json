@@ -8,7 +8,8 @@
     "build": "ng build",
     "test": "ng test",
     "lint": "ng lint",
-    "e2e": "ng e2e"
+    "e2e": "ng e2e",
+    "start:all": "concurrently \"ng serve\" \"node src/app/operator-tablet/service/server.js\""
   },
   "private": true,
   "dependencies": {
@@ -21,6 +22,8 @@
     "@angular/platform-browser-dynamic": "^17.0.0",
     "@angular/router": "^17.0.0",
     "@google/generative-ai": "^0.24.1",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
     "rxjs": "^7.8.0",
     "socket.io-client": "^4.8.3",
     "three": "^0.184.0",
@@ -33,6 +36,7 @@
     "@angular/compiler-cli": "^17.0.0",
     "@types/node": "^20.0.0",
     "@types/three": "^0.184.0",
+    "concurrently": "^8.0.0",
     "typescript": "~5.2.0"
   }
 }

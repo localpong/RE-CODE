@@ -10,8 +10,7 @@ import { RobotStatusComponent } from './operator-tablet/component/robot-status/r
 import { AiTerminalComponent } from './operator-tablet/component/terminal/ai-terminal.component';
 import { WorldViewComponent } from './operator-tablet/component/operator-tablet/world-view.component';
 import { AssistantTabletComponent } from './operator-tablet/component/assistant-tablet/assistant-tablet.component';
-
- 
+import { WorkspaceManagerComponent } from './operator-tablet/component/workspace-manager/workspace-manager.component';
 
 @NgModule({
   declarations: [
@@ -20,7 +19,8 @@ import { AssistantTabletComponent } from './operator-tablet/component/assistant-
     AssistantTabletComponent,
     RobotStatusComponent,
     AiTerminalComponent,
-    WorldViewComponent
+    WorldViewComponent,
+    WorkspaceManagerComponent
   ],
   imports: [
     BrowserModule,

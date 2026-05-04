@@ -66,6 +66,7 @@
         <div class="viewport-header">
           <span class="active-session-name">SESSION: {{ getActiveSessionTitle() }}</span>
           <div class="header-actions">
+            <button class="settings-btn workspace-btn" (click)="toggleWorkspaceManager()" title="จัดการ Agent และ Workspaces">[ WORKSPACE MANAGER ]</button>
             <button class="settings-btn" (click)="toggleSettings()" title="ตั้งค่าบุคลิก AI">[ SETTINGS ]</button>
             <button class="clear-chat-btn" (click)="clearChat()" title="ล้างประวัติแชท">[ CLEAR ]</button>
           </div>
@@ -75,6 +76,14 @@
         <div class="session-settings" [class.open]="showSettings">
             <ng-container *ngIf="getActiveSession() as currentSession">
               <div class="tab-content">
+                <label style="color: #00ffaa; text-shadow: 0 0 5px #00ffaa;">AGENT (เลือก Agent จาก Workspace):</label>
+                <select class="settings-input" [(ngModel)]="currentSession.agentId" (change)="saveSessions()">
+                  <option value="">-- ไม่ใช้ Agent (ใช้การตั้งค่าแบบ Manual ด้านล่าง) --</option>
+                  <optgroup *ngFor="let ws of workspaces" [label]="ws.name">
+                    <option *ngFor="let agent of ws.agents" [value]="agent.id">{{ agent.name }}</option>
+                  </optgroup>
+                </select>
+
                 <label>API KEY (สำหรับห้องนี้):</label>
                 <input type="password" class="settings-input" [(ngModel)]="currentSession.apiKey" (change)="saveSessions()" placeholder="กรอก API Key ลับของคุณ">
 
@@ -82,7 +91,7 @@
                 <input type="text" class="settings-input" [(ngModel)]="currentSession.apiUrl" (change)="saveSessions()" placeholder="เช่น http://localhost:11434/api/chat">
 
                 <label style="margin-top: 5px;">MODEL NAME (ชื่อโมเดล Local/API):</label>
-                <input type="text" class="settings-input" [(ngModel)]="currentSession.modelName" (change)="saveSessions()" placeholder="เช่น qwen2.5, claude-3-5-sonnet" list="localModelsList">
+                <input type="text" class="settings-input" [(ngModel)]="currentSession.modelName" (change)="saveSessions()" placeholder="เช่น qwen2.5, claude-haiku-4-5-20251001" list="localModelsList">
                 <datalist id="localModelsList">
                   <option *ngFor="let model of localModels" [value]="model"></option>
                 </datalist>
@@ -101,6 +110,14 @@
               </div>
             </ng-container>
         </div>
+
+        <!-- Workspace Manager Overlay -->
+        <app-workspace-manager 
+          *ngIf="showWorkspaceManager"
+          [(workspaces)]="workspaces"
+          (workspacesChange)="saveWorkspaces()"
+          (close)="showWorkspaceManager = false">
+        </app-workspace-manager>
 
         <!-- AI Terminal สำหรับแชทและแสดงผลลัพธ์ -->
         <app-ai-terminal

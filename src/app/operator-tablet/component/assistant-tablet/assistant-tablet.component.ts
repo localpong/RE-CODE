@@ -1,5 +1,6 @@
 import { Component, OnInit, HostListener, ViewChild } from '@angular/core';
 import { AiTerminalComponent } from '../terminal/ai-terminal.component';
+import { AppWorkspace, AppAgent } from '../workspace-manager/workspace-manager.component';
 
 interface ChatSession {
   id: string;
@@ -10,6 +11,7 @@ interface ChatSession {
   modelName?: string;
   apiUrl?: string;
   isPinned?: boolean;
+  agentId?: string;
   history: { role: string, text: string }[];
 }
 
@@ -26,8 +28,11 @@ export class AssistantTabletComponent implements OnInit {
   isSidebarOpen: boolean = true;
 
   private readonly STORAGE_KEY = 'ASSISTANT_SESSIONS_DATA';
+  private readonly WORKSPACE_STORAGE_KEY = 'ASSISTANT_WORKSPACES_DATA';
 
   showSettings: boolean = false;
+  showWorkspaceManager: boolean = false;
+  workspaces: AppWorkspace[] = [];
   sessionSearchTerm: string = ''; // ตัวแปรสำหรับค้นหาห้องสนทนา
   isDragging: boolean = false; // ตัวแปรแสดงสถานะการลากไฟล์
   private dragCounter: number = 0; // ตัวแปรแก้บัค UI กะพริบตอนลากไฟล์ทับกล่องลูก
@@ -59,6 +64,7 @@ export class AssistantTabletComponent implements OnInit {
   currentAiFace: string = " [ O   O ] \n   \\_-_/   ";
   chatHistory: { role: string, text: string }[] = this.sessions[0].history;
   isListening: boolean = false;
+  recognition: any;
   userCommand: string = '';
 
   get filteredSessions(): ChatSession[] {
@@ -82,6 +88,8 @@ export class AssistantTabletComponent implements OnInit {
   constructor() {}
 
   ngOnInit(): void {
+    this.initSpeechRecognition(); // เริ่มต้นระบบรับคำสั่งเสียง
+
     this.fetchLocalModels(); // โหลดรายชื่อโมเดลในเครื่องตอนเปิดหน้าจอ
 
     // โหลดข้อมูล Session จาก localStorage
@@ -108,6 +116,16 @@ export class AssistantTabletComponent implements OnInit {
       }
     }
 
+    // โหลดข้อมูล Workspace จาก localStorage
+    const savedWorkspaces = localStorage.getItem(this.WORKSPACE_STORAGE_KEY);
+    if (savedWorkspaces) {
+      try {
+        this.workspaces = JSON.parse(savedWorkspaces);
+      } catch (e) {
+        console.error('Failed to parse saved workspaces', e);
+      }
+    }
+
     // อัปเดตเวลาบนหน้าจอ
     setInterval(() => {
       this.currentTime = new Date();
@@ -121,6 +139,28 @@ export class AssistantTabletComponent implements OnInit {
     // โหลดรายการแพ็กเกจเสียงล่วงหน้า เพื่อเตรียมพร้อมสำหรับ Text-to-Speech
     if ('speechSynthesis' in window) {
       window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+    }
+  }
+
+  initSpeechRecognition() {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      this.recognition = new SpeechRecognition();
+      this.recognition.lang = 'th-TH'; // ตั้งค่าเป็นภาษาไทย
+      this.recognition.continuous = false;
+      this.recognition.interimResults = false;
+
+      this.recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        this.userCommand = transcript;
+        this.sendCommand(); // ส่งคำสั่งทันทีที่พูดจบ
+      };
+
+      this.recognition.onend = () => {
+        this.isListening = false;
+      };
+    } else {
+      console.warn('เบราว์เซอร์นี้ไม่รองรับระบบ Speech Recognition');
     }
   }
 
@@ -155,6 +195,10 @@ export class AssistantTabletComponent implements OnInit {
     localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.sessions));
   }
 
+  saveWorkspaces() {
+    localStorage.setItem(this.WORKSPACE_STORAGE_KEY, JSON.stringify(this.workspaces));
+  }
+
   resetSessionSettings() {
     const session = this.getActiveSession();
     if (session && confirm('คุณแน่ใจหรือไม่ว่าต้องการคืนค่าการตั้งค่าห้องนี้กลับเป็นค่าเริ่มต้น?')) {
@@ -163,6 +207,7 @@ export class AssistantTabletComponent implements OnInit {
       session.apiKey = '';
       session.modelName = 'qwen2.5';
       session.apiUrl = '';
+      session.agentId = '';
       this.saveSessions();
     }
   }
@@ -184,6 +229,10 @@ export class AssistantTabletComponent implements OnInit {
     this.showSettings = !this.showSettings;
   }
 
+  toggleWorkspaceManager() {
+    this.showWorkspaceManager = !this.showWorkspaceManager;
+  }
+
   createNewSession() {
     const newId = 'session-' + Date.now();
     const newSession: ChatSession = {
@@ -194,6 +243,7 @@ export class AssistantTabletComponent implements OnInit {
       apiKey: '',
       modelName: 'qwen2.5',
       apiUrl: '',
+      agentId: '',
       history: [{ role: 'ai', text: 'ห้องสนทนาใหม่ พร้อมใช้งานครับ' }]
     };
     this.sessions.push(newSession);
@@ -483,11 +533,52 @@ export class AssistantTabletComponent implements OnInit {
     this.callLocalAI();
   }
 
+  findAgentById(agentId: string): AppAgent | undefined {
+    for (const ws of this.workspaces) {
+      const agent = ws.agents.find(a => a.id === agentId);
+      if (agent) return agent;
+    }
+    return undefined;
+  }
+
+  buildAgentContext(agent: AppAgent): string {
+    let context = `[PERSONA]: ${agent.systemPrompt}`;
+    
+    let memContext = '';
+    let skillContext = '';
+    
+    for (const ws of this.workspaces) {
+      agent.memoryStoreIds.forEach(mid => {
+        const mem = ws.memoryStores.find(m => m.id === mid);
+        if (mem) memContext += `\n- [${mem.name}]: ${mem.description}`;
+      });
+      agent.skillIds.forEach(sid => {
+        const skill = ws.skills.find(s => s.id === sid);
+        if (skill) skillContext += `\n- [${skill.name}]: ${skill.description}`;
+      });
+    }
+
+    if (memContext) context += `\n\n[MEMORY STORES (RAG KNOWLEDGE)]:${memContext}`;
+    if (skillContext) context += `\n\n[AVAILABLE SKILLS]:${skillContext}`;
+    
+    return context;
+  }
+
   async callLocalAI() {
     const session = this.getActiveSession();
-    const systemPrompt = session?.systemPrompt || 'คุณคือผู้ช่วย AI ทั่วไป';
-    const finalSystemPrompt = `[PERSONA]: ${systemPrompt}`;
-    const sessionTemperature = session?.temperature ?? 0.8;
+    let finalSystemPrompt = `[PERSONA]: ${session?.systemPrompt || 'คุณคือผู้ช่วย AI ทั่วไป'}`;
+    let sessionTemperature = session?.temperature ?? 0.8;
+    let modelName = (session?.modelName ?? 'qwen2.5').trim();
+
+    // Override ด้วย Agent หากมีการเลือกไว้
+    if (session?.agentId) {
+      const agent = this.findAgentById(session.agentId);
+      if (agent) {
+        finalSystemPrompt = this.buildAgentContext(agent);
+        sessionTemperature = agent.temperature;
+        modelName = agent.modelName;
+      }
+    }
 
     // กรองข้อความระบบทิ้งไปก่อน เพื่อไม่ให้ API สับสน
     const validHistory = this.chatHistory.filter(m => !m.text.startsWith('[SYSTEM_START]') && !m.text.startsWith('[SYSTEM]'));
@@ -501,7 +592,6 @@ export class AssistantTabletComponent implements OnInit {
     try {
       let aiResponseText = '';
       const apiKey = (session?.apiKey ?? '').trim();
-      const modelName = (session?.modelName ?? 'qwen2.5').trim();
       const apiUrl = (session?.apiUrl ?? '').trim();
 
       if (apiKey) {
@@ -581,7 +671,15 @@ export class AssistantTabletComponent implements OnInit {
             claudeMessages.push({ role: 'user', content: '...' }); // กันการส่ง array ว่างไปหา Claude
           }
 
-          const apiEndpoint = apiUrl || 'https://api.anthropic.com/v1/messages';
+          let apiEndpoint = apiUrl || 'https://api.anthropic.com/v1/messages';
+          
+          // ช่วยเติม Path ให้ถ้าผู้ใช้กรอกมาแค่ http://localhost:3000
+          if (apiEndpoint.endsWith('/')) {
+            apiEndpoint = apiEndpoint.slice(0, -1);
+          }
+          if (apiEndpoint === 'http://localhost:3000') {
+            apiEndpoint += '/api/claude';
+          }
           
           // จำลองพฤติกรรม --max-time 600 (600 วินาที = 600,000 ms) ด้วย AbortController
           const controller = new AbortController();
@@ -689,8 +787,18 @@ export class AssistantTabletComponent implements OnInit {
   }
 
   toggleListening() {
-    this.isListening = !this.isListening;
-    // TODO: สั่งทำงานระบบ SpeechRecognition แบบเดียวกับหน้า Operator
+    if (!this.recognition) {
+      alert('เบราว์เซอร์ของคุณไม่รองรับระบบสั่งการด้วยเสียง (แนะนำให้ใช้ Google Chrome หรือ Edge)');
+      return;
+    }
+    if (this.isProcessing) return;
+    
+    if (this.isListening) {
+      this.recognition.stop();
+    } else {
+      this.recognition.start();
+      this.isListening = true;
+    }
   }
 
   stopSpeaking() {
