@@ -9,6 +9,7 @@ import { OperatorTabletComponent } from './operator-tablet/component/operator-ta
 import { RobotStatusComponent } from './operator-tablet/component/robot-status/robot-status.component';
 import { AiTerminalComponent } from './operator-tablet/component/terminal/ai-terminal.component';
 import { WorldViewComponent } from './operator-tablet/component/operator-tablet/world-view.component';
+import { AssistantTabletComponent } from './operator-tablet/component/assistant-tablet/assistant-tablet.component';
 
  
 
@@ -16,6 +17,7 @@ import { WorldViewComponent } from './operator-tablet/component/operator-tablet/
   declarations: [
     AppComponent,
     OperatorTabletComponent,
+    AssistantTabletComponent,
     RobotStatusComponent,
     AiTerminalComponent,
     WorldViewComponent
