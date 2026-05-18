@@ -378,23 +378,30 @@ $glass-border: rgba(0, 251, 255, 0.2);
   }
 
   .session-settings {
-    background: rgba(0, 10, 15, 0.95);
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0; // ให้กล่องยืดเต็มความสูงเสมอ
+    z-index: 10;
+    background: rgba(0, 10, 15, 0.98);
     backdrop-filter: blur(15px);
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 0;
+    transform: translateY(-100%); // ซ่อนขึ้นไปด้านบนแทนการลดความสูง
     opacity: 0;
-    padding: 0 20px;
-    border-bottom: none; // แก้ปัญหาขอบซ้อนกันตอนพับเก็บ
-    overflow: hidden;
+    padding: 55px 20px 20px 20px; // กาง Padding รอไว้เลยเพื่อไม่ให้เกิดการกระตุกเวลาเลื่อน
+    border-bottom: none;
+    overflow-y: auto; // ปล่อยให้เลื่อนอิสระ
     pointer-events: none;
-    transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease; // ระบุแอนิเมชันให้ชัดเจน ไม่กวน border
+    box-sizing: border-box;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+    box-shadow: 0 15px 30px rgba(0, 0, 0, 0.8);
 
     &.open {
-      max-height: 800px; // เผื่อความสูงไว้ให้ปุ่ม Reset, API Key, API URL, Model Name และ Textarea ที่ยาวขึ้น
+      transform: translateY(0); // เลื่อนลงมาทับ
       opacity: 1;
-      padding: 15px 20px;
       border-bottom: 1px solid rgba($cyan, 0.2);
       pointer-events: auto;
     }
@@ -624,6 +631,38 @@ $glass-border: rgba(0, 251, 255, 0.2);
   100% { opacity: 1; }
 }
 
+// สไตล์ปุ่ม Stop AI ให้เป็นธีม Cyberpunk
+.stop-btn {
+  background: rgba(255, 0, 85, 0.1) !important;
+  border: 1px solid rgba(255, 0, 85, 0.5) !important;
+  color: #ff0055 !important;
+  border-radius: 8px !important;
+  padding: 6px 12px !important;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: bold;
+  letter-spacing: 1px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.3s ease !important;
+  box-shadow: 0 0 10px rgba(255, 0, 85, 0.2) !important;
+  cursor: pointer;
+  width: auto !important;
+  height: auto !important;
+
+  &:hover {
+    background: rgba(255, 0, 85, 0.3) !important;
+    box-shadow: 0 0 15px rgba(255, 0, 85, 0.6) !important;
+    transform: scale(1.05);
+  }
+
+  .stop-icon {
+    font-size: 0.6rem;
+    animation: pulse 1.5s infinite;
+  }
+}
+
 // Mobile Responsive
 @media (max-width: 768px) {
   .tablet-header {
@@ -643,6 +682,10 @@ $glass-border: rgba(0, 251, 255, 0.2);
   // ปรับ UI หน้าต่างแชทให้พอดีกับมือถือ
   .assistant-viewport {
     
+    .session-settings {
+      padding: 40px 15px 15px 15px; // ลด padding ให้เหมาะกับ mobile header
+    }
+
     .viewport-header {
       padding: 6px 10px;
       

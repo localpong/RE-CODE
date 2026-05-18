@@ -11,6 +11,8 @@ import { AiTerminalComponent } from './operator-tablet/component/terminal/ai-ter
 import { WorldViewComponent } from './operator-tablet/component/operator-tablet/world-view.component';
 import { AssistantTabletComponent } from './operator-tablet/component/assistant-tablet/assistant-tablet.component';
 import { WorkspaceManagerComponent } from './operator-tablet/component/workspace-manager/workspace-manager.component';
+import { CodeDiffComponent } from './operator-tablet/component/terminal/code-diff.component';
+import { ApproveConfigComponent } from './operator-tablet/component/terminal/approve-config.component';
 
 @NgModule({
   declarations: [
@@ -20,7 +22,9 @@ import { WorkspaceManagerComponent } from './operator-tablet/component/workspace
     RobotStatusComponent,
     AiTerminalComponent,
     WorldViewComponent,
-    WorkspaceManagerComponent
+    WorkspaceManagerComponent,
+    CodeDiffComponent,
+    ApproveConfigComponent
   ],
   imports: [
     BrowserModule,

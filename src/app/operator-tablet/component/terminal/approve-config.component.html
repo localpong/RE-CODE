@@ -1,0 +1,61 @@
+<div class="approve-config-panel">
+
+  <div class="panel-title">
+    <span class="icon">⚙</span> AI EDIT PERMISSIONS
+  </div>
+
+  <!-- Mode Selector -->
+  <div class="mode-row">
+    <button class="mode-btn manual" [class.active]="config.mode === 'manual'" (click)="setMode('manual')">
+      <span class="mode-icon">🔒</span>
+      <span class="mode-label">MANUAL</span>
+    </button>
+    <button class="mode-btn smart" [class.active]="config.mode === 'smart'" (click)="setMode('smart')">
+      <span class="mode-icon">🧠</span>
+      <span class="mode-label">SMART</span>
+    </button>
+    <button class="mode-btn auto" [class.active]="config.mode === 'auto'" (click)="setMode('auto')">
+      <span class="mode-icon">⚡</span>
+      <span class="mode-label">AUTO</span>
+    </button>
+  </div>
+
+  <div class="mode-desc">{{ getModeDescription() }}</div>
+
+  <!-- Countdown (Smart + Auto) -->
+  <div class="config-row" *ngIf="config.mode !== 'manual'">
+    <div class="row-label">
+      COUNTDOWN BEFORE APPROVE
+      <span class="value-badge">{{ config.countdownSeconds }}s</span>
+    </div>
+    <input type="range" class="cyber-slider" min="1" max="10" step="1"
+      [(ngModel)]="config.countdownSeconds" (input)="emit()">
+    <div class="range-hints"><span>1s</span><span>10s</span></div>
+  </div>
+
+  <!-- Smart mode settings -->
+  <ng-container *ngIf="config.mode === 'smart'">
+    <div class="divider"></div>
+
+    <div class="config-row">
+      <div class="row-label">MAX RISK LEVEL TO AUTO-APPROVE</div>
+      <div class="risk-btn-row">
+        <button class="risk-btn low"    [class.active]="config.maxRiskLevel === 'low'"    (click)="setRiskLevel('low')">🟢 LOW</button>
+        <button class="risk-btn medium" [class.active]="config.maxRiskLevel === 'medium'" (click)="setRiskLevel('medium')">🟡 MEDIUM</button>
+        <button class="risk-btn high"   [class.active]="config.maxRiskLevel === 'high'"   (click)="setRiskLevel('high')">🔴 HIGH</button>
+      </div>
+      <div class="risk-desc">{{ getRiskDescription() }}</div>
+    </div>
+
+    <div class="config-row">
+      <div class="row-label">
+        MAX LINES CHANGED
+        <span class="value-badge">{{ config.maxLinesChanged }}</span>
+      </div>
+      <input type="range" class="cyber-slider" min="5" max="500" step="5"
+        [(ngModel)]="config.maxLinesChanged" (input)="emit()">
+      <div class="range-hints"><span>5</span><span>500</span></div>
+    </div>
+  </ng-container>
+
+</div>

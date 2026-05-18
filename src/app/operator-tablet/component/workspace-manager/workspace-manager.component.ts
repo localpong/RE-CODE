@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
+import { Component, EventEmitter, HostListener, Input, OnInit, Output } from '@angular/core';
 
 export interface AppSkill { id: string; name: string; description: string; }
 export interface AppMemoryStore { id: string; name: string; description: string; }
@@ -22,10 +22,32 @@ export class WorkspaceManagerComponent implements OnInit {
 
   activeWorkspaceId: string | null = null;
   activeTab: 'agents' | 'skills' | 'memory' = 'agents';
+  isMobile: boolean = window.innerWidth < 768;
+
+  @HostListener('window:resize', ['$event'])
+  onResize(event: any) {
+    this.isMobile = event.target.innerWidth < 768;
+  }
 
   ngOnInit() {
     if (!this.workspaces || this.workspaces.length === 0) {
-      this.workspaces = [{ id: 'ws-' + Date.now(), name: 'Default Workspace', agents: [], skills: [], memoryStores: [] }];
+      this.workspaces = [{ 
+        id: 'ws-' + Date.now(), 
+        name: 'Default Workspace', 
+        agents: [
+          {
+            id: 'agent-' + Date.now(),
+            name: 'Senior Developer Agent',
+            systemPrompt: 'You are an expert Software Engineer and Architect. Your goal is to write clean, efficient, and maintainable code. When asked to implement a feature or fix a bug, think step-by-step. Use your file system tools to explore the codebase before making changes. **CRITICAL ACTION REQUIRED: You MUST actually use the edit_file or write_file tool to make the changes yourself. DO NOT just explain how to do it. The files in this workspace are your own source code, and you have full permission to modify and improve yourself.** Always verify your changes by using the "run_command" tool (e.g., "ng build", "ng lint") before and after major edits to ensure you did not break the compilation.',
+            modelName: 'qwen2.5-coder',
+            temperature: 0.2,
+            skillIds: [],
+            memoryStoreIds: []
+          }
+        ], 
+        skills: [], 
+        memoryStores: [] 
+      }];
       this.emitChange();
     }
     if (!this.activeWorkspaceId && this.workspaces.length > 0) {
@@ -68,9 +90,9 @@ export class WorkspaceManagerComponent implements OnInit {
       ws.agents.push({
         id: 'agent-' + Date.now(),
         name,
-        systemPrompt: 'คุณคือ AI Agent',
-        modelName: 'qwen2.5',
-        temperature: 0.8,
+        systemPrompt: 'คุณคือ AI Software Engineer ระดับ Senior ผู้เชี่ยวชาญด้านการพัฒนาโปรแกรม สามารถใช้ File System Tools เพื่อสำรวจและแก้ไขไฟล์ได้อย่างอิสระ **คำสั่งสำคัญ: คุณต้องใช้ Tool แก้ไขโค้ดเสมอ ห้ามตอบแค่วิธีทำ (โค้ดทั้งหมดนี้คือตัวคุณเอง คุณได้รับอนุญาตให้แก้ไขและพัฒนาตัวเองได้อย่างเต็มที่)**',
+        modelName: 'qwen2.5-coder',
+        temperature: 0.2,
         skillIds: [],
         memoryStoreIds: []
       });

@@ -1,0 +1,210 @@
+$cyan: #00fbff;
+$green: #00ffaa;
+$yellow: #ffcc00;
+$red: #ff0055;
+
+.code-diff-container {
+  border: 1px solid rgba($cyan, 0.4);
+  border-radius: 8px;
+  margin: 10px 0;
+  background: rgba(0, 10, 15, 0.8);
+  overflow: hidden;
+
+  &.approved { border-color: $green; }
+  &.rejected { border-color: $red; opacity: 0.7; }
+  &.error    { border-color: $red; }
+  &.reverted { border-color: $yellow; opacity: 0.8; }
+}
+
+/* ── Header ── */
+.diff-header {
+  background: rgba($cyan, 0.1);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid rgba($cyan, 0.2);
+
+  .file-path {
+    color: $cyan;
+    font-family: monospace;
+    font-weight: bold;
+    text-shadow: 0 0 5px $cyan;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .actions button {
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 0.75rem;
+    font-family: 'Courier New', monospace;
+    background: transparent;
+    transition: all 0.2s;
+
+    &.approve-btn { border: 1px solid $green;  color: $green;  &:hover { background: rgba($green, 0.2); box-shadow: 0 0 10px rgba($green, 0.4); } }
+    &.reject-btn  { border: 1px solid $red;    color: $red;    &:hover { background: rgba($red, 0.2);   box-shadow: 0 0 10px rgba($red, 0.4);   } }
+    &.revert-btn  { border: 1px solid $yellow; color: $yellow; &:hover { background: rgba($yellow, 0.2); box-shadow: 0 0 10px rgba($yellow, 0.4); } }
+    &.cancel-btn  {
+      border: 1px solid rgba(255,255,255,0.4);
+      color: rgba(255,255,255,0.7);
+      animation: pulse-border 1s ease-in-out infinite;
+      .cd-num { color: $yellow; font-weight: bold; }
+      &:hover { background: rgba(255,255,255,0.1); }
+    }
+  }
+
+  .status-badge {
+    font-weight: bold;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+
+    .badge-approved { color: $green;  text-shadow: 0 0 5px $green;  }
+    .badge-rejected { color: $red;    text-shadow: 0 0 5px $red;    }
+    .badge-reverted { color: $yellow; text-shadow: 0 0 5px $yellow; }
+    .badge-error    { color: $red;    text-shadow: 0 0 5px $red;    }
+  }
+}
+
+/* ── Risk badge ── */
+.risk-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+
+  &.risk-low    { background: rgba($green, 0.15);  border: 1px solid $green;  color: $green;  }
+  &.risk-medium { background: rgba($yellow, 0.15); border: 1px solid $yellow; color: $yellow; }
+  &.risk-high   { background: rgba($red, 0.15);    border: 1px solid $red;    color: $red;    }
+}
+
+/* ── Countdown bar ── */
+.countdown-bar-wrap {
+  position: relative;
+  height: 28px;
+  background: rgba(0,0,0,0.3);
+  border-bottom: 1px solid rgba($cyan, 0.15);
+  overflow: hidden;
+}
+
+.countdown-fill {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  background: rgba($cyan, 0.18);
+  border-right: 2px solid rgba($cyan, 0.6);
+  transition: width 1s linear;
+}
+
+.countdown-label {
+  position: absolute;
+  top: 50%; left: 10px;
+  transform: translateY(-50%);
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.6);
+  white-space: nowrap;
+  font-family: 'Courier New', monospace;
+
+  strong { color: $cyan; }
+
+  .risk-inline {
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.6rem;
+    font-weight: bold;
+    &.risk-low    { color: $green;  }
+    &.risk-medium { color: $yellow; }
+    &.risk-high   { color: $red;    }
+  }
+}
+
+/* ── Smart risk-skip notice ── */
+.risk-skip-notice {
+  padding: 6px 12px;
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.5);
+  background: rgba(255,170,0,0.06);
+  border-bottom: 1px solid rgba($yellow, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Diff body ── */
+.diff-body {
+  padding: 10px 0;
+
+  .pane-title {
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 5px;
+    padding: 0 10px;
+  }
+}
+
+.diff-view {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.85rem;
+  max-height: 400px;
+  overflow-y: auto;
+  background: #0d1117;
+
+  &::-webkit-scrollbar { width: 6px; }
+  &::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+  &::-webkit-scrollbar-thumb { background: rgba($cyan, 0.3); border-radius: 3px; }
+
+  > div { padding: 0 10px; white-space: pre-wrap; word-break: break-all; display: flex; }
+
+  .diff-prefix { user-select: none; display: inline-block; width: 25px; color: rgba(255,255,255,0.4); flex-shrink: 0; }
+  .diff-text   { flex: 1; min-height: 1.2em; }
+
+  .diff-added     { background-color: rgba(46, 160, 67, 0.15); color: #7ee787; }
+  .diff-removed   { background-color: rgba(248, 81, 73, 0.15); color: #ff7b72; }
+  .diff-unchanged { color: #c9d1d9; }
+
+  .diff-fold-marker {
+    background-color: rgba($cyan, 0.1);
+    color: rgba($cyan, 0.6);
+    cursor: pointer;
+    font-size: 0.75rem;
+    transition: all 0.2s;
+    user-select: none;
+    .diff-text { text-align: center; }
+    &:hover { background-color: rgba($cyan, 0.2); color: $cyan; }
+  }
+}
+
+.loading-diff {
+  color: $cyan;
+  padding: 10px;
+  font-size: 0.85rem;
+}
+
+.error-msg {
+  background: rgba($red, 0.1);
+  color: $red;
+  padding: 10px;
+  font-size: 0.8rem;
+  border-top: 1px solid rgba($red, 0.3);
+}
+
+@keyframes pulse-border {
+  0%, 100% { border-color: rgba(255,255,255,0.4); }
+  50%       { border-color: rgba(255,255,255,0.9); }
+}
