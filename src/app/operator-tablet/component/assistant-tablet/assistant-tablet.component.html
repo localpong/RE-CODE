@@ -1,0 +1,146 @@
+<div class="tablet-container"
+     (dragover)="onDragOver($event)" 
+     (dragenter)="onDragEnter($event)" 
+     (dragleave)="onDragLeave($event)" 
+     (drop)="onDrop($event)">
+
+  <!-- Drag & Drop Overlay -->
+  <div class="drag-overlay" *ngIf="isDragging">
+    <div class="drag-box">
+      <span class="icon">📂</span>
+      <h2>DROP FILE TO IMPORT</h2>
+      <p>ปล่อยเมาส์เพื่อนำเข้าประวัติแชท</p>
+    </div>
+  </div>
+
+  <div class="glass-screen">
+    
+    <!-- Header -->
+    <div class="tablet-header">
+      <div class="sys-info">
+        <button class="icon-btn" (click)="toggleSidebar()" title="Toggle Sidebar">☰</button>
+        <span class="pulse-icon"></span>
+        SYSTEM: PERSONAL-ASSISTANT v1.0 | CONNECTION: SECURE
+      </div>
+      <div class="project-name">PROJECT: ASSISTANT</div>
+      <div class="time-display">SYS.TIME: {{ currentTime | date:'HH:mm:ss' }}</div>
+    </div>
+
+    <div class="tablet-content">
+      
+      <!-- Left Sidebar: Chat History / Sessions -->
+      <div class="sidebar-left" [class.open]="isSidebarOpen" [class.closed]="!isSidebarOpen">
+        <div class="sidebar-header">
+          <h3>SESSIONS</h3>
+          <button class="close-btn" (click)="toggleSidebar()">✕</button>
+        </div>
+        
+        <div class="sidebar-search">
+          <input type="text" [(ngModel)]="sessionSearchTerm" placeholder="🔍 ค้นหาห้องสนทนา...">
+        </div>
+
+        <div class="session-list">
+          <!-- แสดงรายชื่อห้องแชทด้วย *ngFor -->
+          <div class="session-item" 
+               *ngFor="let session of filteredSessions" 
+               [class.active]="session.id === activeSessionId"
+               (click)="selectSession(session.id)">
+            <span class="session-title" [title]="session.title">
+              <span *ngIf="session.isPinned" style="color: #ff00ff; text-shadow: 0 0 5px #ff00ff; margin-right: 5px;">★</span>
+              {{ session.title }}
+            </span>
+            <div class="session-actions">
+              <button class="action-btn pin" [class.pinned]="session.isPinned" (click)="togglePin(session.id, $event)" [title]="session.isPinned ? 'ถอนหมุด' : 'ปักหมุด'">★</button>
+              <button class="action-btn edit" (click)="renameSession(session.id, $event)" title="เปลี่ยนชื่อ">✎</button>
+              <button class="action-btn delete" (click)="deleteSession(session.id, $event)" title="ลบห้อง">✕</button>
+            </div>
+          </div>
+          
+          <!-- ปุ่มสร้างห้องใหม่ -->
+          <div class="new-session-btn" (click)="createNewSession()">+ New Session</div>
+        </div>
+      </div>
+
+      <!-- Main Assistant Viewport (Right Area) -->
+      <div class="assistant-viewport">
+        <div class="viewport-header">
+          <span class="active-session-name">SESSION: {{ getActiveSessionTitle() }}</span>
+          <div class="header-actions">
+            <button class="settings-btn workspace-btn" (click)="toggleWorkspaceManager()" title="จัดการ Agent และ Workspaces">[ WORKSPACE MANAGER ]</button>
+            <button class="settings-btn" (click)="toggleSettings()" title="ตั้งค่าบุคลิก AI">[ SETTINGS ]</button>
+            <button class="clear-chat-btn" (click)="clearChat()" title="ล้างประวัติแชท">[ CLEAR ]</button>
+          </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div class="session-settings" [class.open]="showSettings">
+            <ng-container *ngIf="getActiveSession() as currentSession">
+              <div class="tab-content">
+                <label style="color: #00ffaa; text-shadow: 0 0 5px #00ffaa;">AGENT (เลือก Agent จาก Workspace):</label>
+                <select class="settings-input" [(ngModel)]="currentSession.agentId" (change)="saveSessions()">
+                  <option value="">-- ไม่ใช้ Agent (ใช้การตั้งค่าแบบ Manual ด้านล่าง) --</option>
+                  <optgroup *ngFor="let ws of workspaces" [label]="ws.name">
+                    <option *ngFor="let agent of ws.agents" [value]="agent.id">{{ agent.name }}</option>
+                  </optgroup>
+                </select>
+
+                <label>API KEY (สำหรับห้องนี้):</label>
+                <input type="password" class="settings-input" [(ngModel)]="currentSession.apiKey" (change)="saveSessions()" placeholder="กรอก API Key ลับของคุณ">
+
+                <label style="margin-top: 5px;">API ENDPOINT (URL เซิร์ฟเวอร์ Custom):</label>
+                <input type="text" class="settings-input" [(ngModel)]="currentSession.apiUrl" (change)="saveSessions()" placeholder="เช่น http://localhost:11434/api/chat">
+
+                <label style="margin-top: 5px;">MODEL NAME (ชื่อโมเดล Local/API):</label>
+                <input type="text" class="settings-input" [(ngModel)]="currentSession.modelName" (change)="saveSessions()" placeholder="เช่น qwen2.5, claude-haiku-4-5-20251001" list="localModelsList">
+                <datalist id="localModelsList">
+                  <option *ngFor="let model of localModels" [value]="model"></option>
+                </datalist>
+
+                <label style="margin-top: 5px; color: #ff00ff; text-shadow: 0 0 5px #ff00ff;">SESSION PROMPT (บุคลิกนิสัยประจำห้องนี้):</label>
+                <textarea
+                  class="tall-textarea"
+                  [(ngModel)]="currentSession.systemPrompt" 
+                  (change)="saveSessions()"
+                  placeholder="กำหนดบทบาทให้ AI เช่น 'คุณคือที่ปรึกษาส่วนตัว...'"></textarea>
+                
+                <label style="margin-top: 5px; color: #ff00ff; text-shadow: 0 0 5px #ff00ff;">SESSION CREATIVITY (Room Temp: {{ currentSession.temperature }}):</label>
+                <input type="range" class="cyber-slider session-slider short-slider" min="0.0" max="1.5" step="0.1" [(ngModel)]="currentSession.temperature" (change)="saveSessions()">
+                <small style="color: rgba(0, 251, 255, 0.6); font-size: 0.7rem; margin-top: 5px; display: block;">> พิมพ์ /sys ตามด้วยข้อความในช่องแชท เพื่อเปลี่ยนนิสัยได้ทันที</small>
+                <button class="reset-btn session-reset" (click)="resetSessionSettings()">↺ Reset Session Settings</button>
+              </div>
+              <app-approve-config
+                [config]="approveConfig"
+                (configChange)="onApproveConfigChange($event)">
+              </app-approve-config>
+            </ng-container>
+        </div>
+
+        <!-- Workspace Manager Overlay -->
+        <app-workspace-manager 
+          *ngIf="showWorkspaceManager"
+          [(workspaces)]="workspaces"
+          (workspacesChange)="saveWorkspaces()"
+          (close)="showWorkspaceManager = false">
+        </app-workspace-manager>
+
+        <!-- AI Terminal สำหรับแชทและแสดงผลลัพธ์ -->
+        <app-ai-terminal
+          class="chat-area"
+          [currentAiFace]="currentAiFace"
+          [chatHistory]="chatHistory"
+          [isProcessing]="isProcessing"
+          [isListening]="isListening"
+          [approveConfig]="approveConfig"
+          [(userCommand)]="userCommand"
+          (commandEntered)="sendCommand()"
+          (toggleListen)="toggleListening()"
+          (stopAudio)="stopSpeaking()"
+          (stopGenerate)="stopGenerating()"
+          (imagesChanged)="onImagesChanged($event)"
+          (filesChanged)="onFilesChanged($event)">
+        </app-ai-terminal>
+      </div>
+      
+    </div>
+  </div>
+</div>

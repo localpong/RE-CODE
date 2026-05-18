@@ -1,0 +1,113 @@
+<div class="workspace-overlay" (click)="close.emit()">
+  <div class="workspace-modal" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <h2><span class="icon">⚙️</span> WORKSPACE MANAGER</h2>
+      <button class="close-btn" (click)="close.emit()">✕</button>
+    </div>
+    
+    <div class="modal-layout">
+      <!-- Sidebar (Workspaces) -->
+      <div class="sidebar">
+        <div class="sidebar-header">WORKSPACES</div>
+        <div class="workspace-list">
+          <div class="workspace-item" *ngFor="let ws of workspaces" 
+               [class.active]="ws.id === activeWorkspaceId"
+               (click)="activeWorkspaceId = ws.id">
+            <span class="ws-name">{{ ws.name }}</span>
+            <button class="del-btn" (click)="deleteWorkspace(ws.id); $event.stopPropagation()">✕</button>
+          </div>
+        </div>
+        <button class="add-btn" (click)="addWorkspace()">+ New Workspace</button>
+      </div>
+
+      <!-- Main Content -->
+      <div class="main-content" *ngIf="activeWorkspace as ws">
+        <div class="tabs">
+          <button [class.active]="activeTab === 'agents'" (click)="activeTab = 'agents'">AGENTS</button>
+          <button [class.active]="activeTab === 'skills'" (click)="activeTab = 'skills'">SKILLS</button>
+          <button [class.active]="activeTab === 'memory'" (click)="activeTab = 'memory'">MEMORY STORES</button>
+        </div>
+
+        <div class="tab-body scrollable">
+          <!-- AGENTS TAB -->
+          <div *ngIf="activeTab === 'agents'">
+            <button class="add-btn mb-10" (click)="addAgent()">+ Create Agent</button>
+            <div class="card" *ngFor="let agent of ws.agents">
+              <div class="card-header">
+                <input class="title-input" [(ngModel)]="agent.name" (change)="emitChange()">
+                <button class="del-btn" (click)="deleteAgent(agent.id)">✕</button>
+              </div>
+              <div class="card-body">
+                <label>Model Name:</label>
+                <input class="settings-input" [(ngModel)]="agent.modelName" (change)="emitChange()">
+                
+                <label>Temperature ({{ agent.temperature }}):</label>
+                <input type="range" class="cyber-slider" min="0" max="1.5" step="0.1" [(ngModel)]="agent.temperature" (change)="emitChange()">
+                
+                <label>System Prompt:</label>
+                <textarea class="settings-input tall" [(ngModel)]="agent.systemPrompt" (change)="emitChange()"></textarea>
+
+                <div class="grid-2">
+                  <div>
+                    <label>Assigned Skills:</label>
+                    <div class="check-list">
+                      <label *ngFor="let skill of ws.skills" class="check-item">
+                        <input type="checkbox" [checked]="agent.skillIds.includes(skill.id)" (change)="toggleAgentSkill(agent, skill.id)">
+                        {{ skill.name }}
+                      </label>
+                      <div *ngIf="ws.skills.length === 0" class="empty-msg">No skills available</div>
+                    </div>
+                  </div>
+                  <div>
+                    <label>Assigned Memory Stores:</label>
+                    <div class="check-list">
+                      <label *ngFor="let mem of ws.memoryStores" class="check-item">
+                        <input type="checkbox" [checked]="agent.memoryStoreIds.includes(mem.id)" (change)="toggleAgentMemory(agent, mem.id)">
+                        {{ mem.name }}
+                      </label>
+                      <div *ngIf="ws.memoryStores.length === 0" class="empty-msg">No memory stores available</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div *ngIf="ws.agents.length === 0" class="empty-msg">No agents in this workspace.</div>
+          </div>
+
+          <!-- SKILLS TAB -->
+          <div *ngIf="activeTab === 'skills'">
+            <button class="add-btn mb-10" (click)="addSkill()">+ Create Skill</button>
+            <div class="card" *ngFor="let skill of ws.skills">
+              <div class="card-header">
+                <input class="title-input" [(ngModel)]="skill.name" (change)="emitChange()">
+                <button class="del-btn" (click)="deleteSkill(skill.id)">✕</button>
+              </div>
+              <div class="card-body">
+                <label>Skill Description (Instructions for AI):</label>
+                <textarea class="settings-input" [(ngModel)]="skill.description" (change)="emitChange()"></textarea>
+              </div>
+            </div>
+            <div *ngIf="ws.skills.length === 0" class="empty-msg">No skills in this workspace.</div>
+          </div>
+
+          <!-- MEMORY STORES TAB -->
+          <div *ngIf="activeTab === 'memory'">
+            <button class="add-btn mb-10" (click)="addMemoryStore()">+ Create Memory Store</button>
+            <div class="card" *ngFor="let mem of ws.memoryStores">
+              <div class="card-header">
+                <input class="title-input" [(ngModel)]="mem.name" (change)="emitChange()">
+                <button class="del-btn" (click)="deleteMemoryStore(mem.id)">✕</button>
+              </div>
+              <div class="card-body">
+                <label>Memory Content (Text / Knowledge Base):</label>
+                <textarea class="settings-input tall" [(ngModel)]="mem.description" (change)="emitChange()"></textarea>
+              </div>
+            </div>
+            <div *ngIf="ws.memoryStores.length === 0" class="empty-msg">No memory stores in this workspace.</div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

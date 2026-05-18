@@ -2,19 +2,173 @@
   <div class="ai-face-container">
     <pre class="ascii-face">{{ currentAiFace }}</pre>
   </div>
+
+  <!-- ===== CHAT LOG ===== -->
   <div class="ai-chat-log" #chatLog>
-    <div *ngFor="let chat of chatHistory" [ngClass]="chat.role">
-      <span class="role-badge">[{{ chat.role | uppercase }}]</span> {{ chat.text }}
+    <ng-container *ngFor="let chat of chatHistory">
+
+      <!-- ── Normal user / ai message (ซ่อนข้อความคิดวิเคราะห์ของ AI ก่อนเรียก Tool) ── -->
+      <div *ngIf="(chat.role === 'user' || chat.role === 'ai') && !chat.isIntermediate" [ngClass]="chat.role">
+        <span class="role-badge">[{{ chat.role | uppercase }}]</span>
+        <ng-container *ngFor="let frag of parseMessage(chat.text); let i = index; trackBy: trackByFragment">
+          <span *ngIf="frag.type === 'text'" style="white-space: pre-wrap;">{{ frag.content }}</span>
+
+          <div *ngIf="frag.type === 'code'" class="code-block">
+            <div class="code-header">
+              <span>{{ frag.language || 'code' }}</span>
+              <button class="copy-code-btn" (click)="copyCodeToClipboard(frag.content, 'code-' + i)">
+                {{ copiedCodeId === 'code-' + i ? '✓ Copied' : 'Copy' }}
+              </button>
+            </div>
+            <pre class="code-content">{{ frag.content }}</pre>
+          </div>
+
+          <!-- Legacy [EDIT_FILE:] from non-Claude models -->
+          <app-code-diff *ngIf="frag.type === 'file-edit'"
+            [filePath]="frag.filePath!"
+            [newContent]="frag.content"
+            [approveConfig]="approveConfig">
+          </app-code-diff>
+        </ng-container>
+      </div>
+
+      <!-- ── Tool call (Claude agentic tool use) ── -->
+      <div *ngIf="chat.role === 'tool-call'" class="tool-call-msg" [ngClass]="'tc-' + chat.toolStatus">
+
+        <!-- Header row: icon + label + path/command + status -->
+        <div class="tc-header">
+          <span class="tc-icon">{{ getToolMeta(chat.toolName).icon }}</span>
+          <span class="tc-label">{{ getToolMeta(chat.toolName).label }}</span>
+          <span class="tc-preview">{{ getToolPreview(chat) }}</span>
+          <span class="tc-status">{{ getToolStatusLabel(chat.toolStatus) }}</span>
+        </div>
+
+        <!-- File write / edit → show diff component with approval wired up -->
+        <app-code-diff
+          *ngIf="(chat.toolName === 'write_file' || chat.toolName === 'edit_file') && chat.toolStatus === 'waiting-approval'"
+          [filePath]="chat.toolInput?.path"
+          [newContent]="chat.toolInput?.newContent"
+          [toolCallId]="chat.toolCallId!"
+          [approveConfig]="approveConfig"
+          (fileApproved)="onToolApproved(chat.toolCallId!)"
+          (fileRejected)="onToolRejected(chat.toolCallId!)">
+        </app-code-diff>
+
+        <!-- run_command → inline approve / reject buttons -->
+        <div class="tc-cmd-block" *ngIf="chat.toolName === 'run_command' || chat.toolName === 'run_tests'">
+          <code class="tc-cmd-text">$ {{ chat.toolInput?.command }}</code>
+          <div class="tc-cmd-actions" *ngIf="chat.toolStatus === 'waiting-approval'">
+            <button class="tc-approve-btn" (click)="onToolApproved(chat.toolCallId!)">✓ Run</button>
+            <button class="tc-reject-btn"  (click)="onToolRejected(chat.toolCallId!)">✕ Deny</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ── Tool result (แสดงเฉพาะผลลัพธ์จาก Terminal / คำสั่ง Command) ── -->
+      <div *ngIf="chat.role === 'tool-result' && (chat.toolName === 'run_command' || chat.toolName === 'run_tests')" class="tool-result-msg">
+        <span class="tr-label">↩ Terminal Output:</span>
+        <pre class="tr-content">{{ chat.text }}</pre>
+      </div>
+
+    </ng-container>
+
+    <!-- ── Loading Indicator ── -->
+    <div *ngIf="isProcessing" class="ai loading-msg">
+      <span class="role-badge">[AI]</span>
+      <span class="loading-text">Loading...</span>
     </div>
   </div>
-  <div class="chat-input-area">
-    <button class="mic-btn" [class.listening]="isListening" (click)="onToggleListen()" [disabled]="isProcessing" title="เปิด/ปิดไมค์">
-      🎤
-    </button>
-    <button class="stop-audio-btn" (click)="onStopAudio()" title="หยุดเสียงพูด">
-      🔇
-    </button>
-    <input type="text" [ngModel]="userCommand" (ngModelChange)="onCommandChange($event)" (keyup.enter)="onEnter()" [disabled]="isProcessing" [placeholder]="isProcessing ? '> Processing...' : '> Awaiting Input...'">
-    <div class="loading-spinner" *ngIf="isProcessing"></div>
+
+  <!-- ===== INPUT AREA ===== -->
+  <div class="chat-input-area"
+       [class.drag-over]="isDragOver"
+       (dragover)="onDragOver($event)"
+       (dragleave)="onDragLeave($event)"
+       (drop)="onDrop($event)">
+
+    <div class="drag-overlay" *ngIf="isDragOver"><span>📂 วางไฟล์ที่นี่</span></div>
+
+    <!-- Slash command autocomplete -->
+    <div class="slash-dropdown" *ngIf="showSlashDropdown && filteredSlashCommands.length > 0">
+      <div class="slash-item"
+           *ngFor="let cmd of filteredSlashCommands; let i = index"
+           (click)="selectSlashCommand(cmd)"
+           [class.active]="i === slashSelectedIndex">
+        <span class="slash-cmd-name">{{ cmd.name }}</span>
+        <span class="slash-cmd-desc">{{ cmd.description }}</span>
+        <span class="slash-cmd-usage">{{ cmd.usage }}</span>
+      </div>
+    </div>
+
+    <!-- @ file mention dropdown -->
+    <div class="mention-dropdown" *ngIf="showMentionDropdown">
+      <div class="mention-item" *ngFor="let item of mentionResults" (click)="selectMention(item.path)">
+        <span *ngIf="item.type === 'folder'">📁</span>
+        <span *ngIf="item.type === 'file'">📄</span>
+        <span *ngIf="item.type === 'loading'">⏳</span>
+        <span *ngIf="item.type === 'empty'">❌</span>
+        <span *ngIf="item.type === 'error'">⚠</span>
+        {{ item.path }}
+      </div>
+    </div>
+
+    <!-- Image paste previews -->
+    <div class="paste-preview" *ngIf="pastedImages.length > 0">
+      <div class="paste-item" *ngFor="let img of pastedImages; let i = index">
+        <img [src]="img.dataUrl" [alt]="img.name" />
+        <span class="paste-name">{{ img.name }}</span>
+        <button class="remove-paste" (click)="removePastedImage(i)" title="ลบรูป">✕</button>
+      </div>
+    </div>
+
+    <!-- Attached files preview -->
+    <div class="attachments-container" *ngIf="attachedFiles.length > 0">
+      <div class="attachment-chip file-chip" *ngFor="let file of attachedFiles; let i = index">
+        <span class="file-icon">📄</span>
+        <span class="file-name" [title]="file">{{ file }}</span>
+        <button class="remove-btn" (click)="removeAttachedFile(i)" title="ลบไฟล์">✕</button>
+      </div>
+    </div>
+
+    <!-- Main input row -->
+    <div class="input-row">
+      <div class="input-toolbar">
+        <button class="tool-btn attach-btn" (click)="triggerFileInput()" [disabled]="isProcessing" title="แนบรูปภาพ">📎</button>
+        <input #fileInput type="file" multiple accept="image/*" style="display:none" (change)="onFileSelected($event)">
+      </div>
+
+      <textarea
+        #textareaRef
+        [ngModel]="userCommand"
+        (input)="onInputChange($event)"
+        (keydown)="onKeyDown($event)"
+        (paste)="onPaste($event)"
+        [disabled]="isProcessing"
+        [placeholder]="isProcessing ? '⏳ กำลังประมวลผล...' : 'พิมพ์ข้อความ...  @ ไฟล์  /คำสั่ง  Shift+↵ บรรทัดใหม่'"
+        rows="1"
+      ></textarea>
+
+      <div class="action-btns">
+        <div class="loading-spinner" *ngIf="isProcessing"></div>
+        <button class="tool-btn stop-btn" *ngIf="isProcessing" (click)="onStopGenerate()" title="หยุด">
+          <span class="stop-icon">■</span> STOP
+        </button>
+        <button class="send-btn" *ngIf="!isProcessing" (click)="onEnter()"
+                [disabled]="!userCommand.trim() && pastedImages.length === 0 && attachedFiles.length === 0" title="ส่ง (Enter)">&#8593;</button>
+      </div>
+    </div>
+
+    <div class="input-hint-bar">
+      <span class="char-count" [class.warn]="userCommand.length > 3000" [class.danger]="userCommand.length > 4500">
+        {{ userCommand.length > 0 ? (userCommand.length | number) + ' ตัวอักษร' : '' }}
+      </span>
+      <span class="shortcut-hints">
+        <kbd>Enter</kbd> ส่ง &nbsp;·&nbsp;
+        <kbd>Shift+Enter</kbd> บรรทัดใหม่ &nbsp;·&nbsp;
+        <kbd>↑</kbd> ข้อความล่าสุด &nbsp;·&nbsp;
+        <kbd>Esc</kbd> ล้าง
+      </span>
+    </div>
   </div>
 </div>

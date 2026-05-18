@@ -1,0 +1,79 @@
+<div class="code-diff-container" [ngClass]="[status, 'mode-' + approveConfig.mode]">
+
+  <!-- Header -->
+  <div class="diff-header">
+    <span class="file-path">📄 {{ filePath }}</span>
+
+    <!-- Risk badge (only in smart/auto mode while pending) -->
+    <span class="risk-badge"
+      *ngIf="approveConfig.mode !== 'manual' && status === 'pending' && !isLoadingDiff"
+      [ngClass]="'risk-' + riskLevel"
+      [title]="riskReason">
+      {{ riskLevel | uppercase }}
+    </span>
+
+    <!-- Pending actions -->
+    <div class="actions" *ngIf="status === 'pending'">
+      <!-- Countdown cancel -->
+      <button class="cancel-btn" *ngIf="countdownActive" (click)="cancelCountdown()" title="ยกเลิก Auto-Approve">
+        ✕ CANCEL <span class="cd-num">({{ countdown }}s)</span>
+      </button>
+      <!-- Manual buttons (shown when no countdown or after cancel) -->
+      <ng-container *ngIf="!countdownActive">
+        <button class="reject-btn"  (click)="reject()">✕ REJECT</button>
+        <button class="approve-btn" (click)="approve()">✓ APPROVE</button>
+      </ng-container>
+    </div>
+
+    <!-- Post-approve actions -->
+    <div class="actions" *ngIf="status === 'approved'">
+      <button class="revert-btn" (click)="revert()">⎌ REVERT</button>
+    </div>
+
+    <!-- Status badge -->
+    <div class="status-badge" *ngIf="status !== 'pending'">
+      <span *ngIf="status === 'approved'" class="badge-approved">✓ APPROVED</span>
+      <span *ngIf="status === 'rejected'" class="badge-rejected">✕ REJECTED</span>
+      <span *ngIf="status === 'reverted'" class="badge-reverted">⎌ REVERTED</span>
+      <span *ngIf="status === 'error'"    class="badge-error">⚠ ERROR</span>
+    </div>
+  </div>
+
+  <!-- Countdown bar -->
+  <div class="countdown-bar-wrap" *ngIf="countdownActive">
+    <div class="countdown-fill" [style.width.%]="countdownProgress"></div>
+    <span class="countdown-label">
+      Auto-approving in <strong>{{ countdown }}s</strong>... &nbsp;
+      <span class="risk-inline" [ngClass]="'risk-' + riskLevel">{{ riskLevel | uppercase }} RISK</span>
+      &nbsp;·&nbsp; {{ riskReason }}
+    </span>
+  </div>
+
+  <!-- Smart mode — risk too high, show reason -->
+  <div class="risk-skip-notice" *ngIf="approveConfig.mode === 'smart' && !countdownActive && status === 'pending' && riskLevel && !isLoadingDiff">
+    <span class="risk-badge" [ngClass]="'risk-' + riskLevel">{{ riskLevel | uppercase }}</span>
+    {{ riskReason }} — กรุณากด Approve ด้วยตนเอง
+  </div>
+
+  <!-- Diff body -->
+  <div class="diff-body" *ngIf="status === 'pending'">
+    <div class="new-code" *ngIf="!isLoadingDiff">
+      <div class="pane-title">Proposed Changes (Review to Apply):</div>
+      <div class="diff-view">
+        <ng-container *ngFor="let line of diffLines; let i = index">
+          <div *ngIf="line.isFoldMarker" class="diff-fold-marker" (click)="expandFold(i)">
+            <span class="diff-text">{{ line.value }}</span>
+          </div>
+          <div *ngIf="!line.isFoldMarker"
+            [ngClass]="{'diff-added': line.added, 'diff-removed': line.removed, 'diff-unchanged': !line.added && !line.removed}">
+            <span class="diff-prefix">{{ line.added ? '+' : (line.removed ? '-' : ' ') }}</span>
+            <span class="diff-text">{{ line.value || ' ' }}</span>
+          </div>
+        </ng-container>
+      </div>
+    </div>
+    <div *ngIf="isLoadingDiff" class="loading-diff">Loading Diff...</div>
+  </div>
+
+  <div class="error-msg" *ngIf="status === 'error'">Error applying changes: {{ errorMessage }}</div>
+</div>
