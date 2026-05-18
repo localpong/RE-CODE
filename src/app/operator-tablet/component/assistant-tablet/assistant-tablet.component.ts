@@ -1,6 +1,7 @@
-import { Component, OnInit, HostListener, ViewChild } from '@angular/core';
-import { AiTerminalComponent } from '../terminal/ai-terminal.component';
+import { Component, OnInit, HostListener, ViewChild, AfterViewInit } from '@angular/core';
+import { AiTerminalComponent, PastedImage, ChatMessage } from '../terminal/ai-terminal.component';
 import { AppWorkspace, AppAgent } from '../workspace-manager/workspace-manager.component';
+import { ApproveConfig, DEFAULT_APPROVE_CONFIG } from '../terminal/approve-config.component';
 
 interface ChatSession {
   id: string;
@@ -9,10 +10,11 @@ interface ChatSession {
   temperature?: number;
   apiKey?: string;
   modelName?: string;
+  voiceURI?: string; // เก็บค่าเสียงที่เลือก
   apiUrl?: string;
   isPinned?: boolean;
   agentId?: string;
-  history: { role: string, text: string }[];
+  history: ChatMessage[];
 }
 
 @Component({
@@ -20,33 +22,43 @@ interface ChatSession {
   templateUrl: './assistant-tablet.component.html',
   styleUrls: ['./assistant-tablet.component.scss']
 })
-export class AssistantTabletComponent implements OnInit {
+export class AssistantTabletComponent implements OnInit, AfterViewInit {
   currentTime: Date = new Date();
   isProcessing: boolean = false;
+  isMobile: boolean = window.innerWidth < 768;
 
   // ควบคุมการแสดงผลแถบประวัติ
   isSidebarOpen: boolean = true;
 
   private readonly STORAGE_KEY = 'ASSISTANT_SESSIONS_DATA';
   private readonly WORKSPACE_STORAGE_KEY = 'ASSISTANT_WORKSPACES_DATA';
+  private readonly APPROVE_CONFIG_KEY = 'ASSISTANT_APPROVE_CONFIG';
 
   showSettings: boolean = false;
   showWorkspaceManager: boolean = false;
   workspaces: AppWorkspace[] = [];
   sessionSearchTerm: string = ''; // ตัวแปรสำหรับค้นหาห้องสนทนา
-  isDragging: boolean = false; // ตัวแปรแสดงสถานะการลากไฟล์
-  private dragCounter: number = 0; // ตัวแปรแก้บัค UI กะพริบตอนลากไฟล์ทับกล่องลูก
+  isDragging: boolean = false;
+  private dragCounter: number = 0;
+  approveConfig: ApproveConfig = { ...DEFAULT_APPROVE_CONFIG };
+  pendingImages: PastedImage[] = [];
+  pendingFiles: string[] = [];
+
+  onImagesChanged(images: PastedImage[]) {
+    this.pendingImages = images;
+  }
   
   localModels: string[] = []; // เก็บรายชื่อโมเดลในเครื่อง
+  availableVoices: any[] = []; // เก็บรายชื่อเสียงสำหรับ TTS
 
   // ตัวแปรสำหรับเชื่อมกับ AI Terminal
   sessions: ChatSession[] = [
     {
       id: 'session-1',
-      title: 'Current Session',
-      systemPrompt: 'คุณคือ GHOST-OS Assistant ผู้ช่วย AI ส่วนตัวที่สุภาพและเป็นทางการ ตอบคำถามสั้นๆ กระชับและช่วยเหลือเจ้านายอย่างเต็มที่',
-      temperature: 0.8,
-      history: [{ role: 'ai', text: '[SYSTEM_START] GHOST-OS Assistant Standby... พร้อมรับคำสั่งแล้วครับเจ้านาย' }]
+      title: 'Code Assistant',
+      systemPrompt: 'คุณคือ AI Software Engineer ระดับ Senior ผู้เชี่ยวชาญด้านการพัฒนาโปรแกรม สามารถใช้ File System Tools เพื่อสำรวจและแก้ไขไฟล์ได้อย่างอิสระ **คำสั่งสำคัญ: คุณต้องใช้ Tool แก้ไขโค้ดเสมอ ห้ามตอบแค่วิธีทำ (โค้ดทั้งหมดนี้คือตัวคุณเอง คุณได้รับอนุญาตให้แก้ไขและพัฒนาตัวเองได้อย่างเต็มที่)**',
+      temperature: 0.2,
+      history: [{ role: 'ai', text: 'สวัสดีครับ ผมคือ AI Code Assistant พร้อมช่วยเหลือในการเขียนและแก้ไขโค้ดของคุณแล้วครับ โปรดระบุไฟล์หรือปัญหาที่คุณต้องการให้จัดการได้เลย' }]
     },
     {
       id: 'session-2',
@@ -62,8 +74,11 @@ export class AssistantTabletComponent implements OnInit {
   ];
   activeSessionId: string = 'session-1';
   currentAiFace: string = " [ O   O ] \n   \\_-_/   ";
-  chatHistory: { role: string, text: string }[] = this.sessions[0].history;
+  chatHistory: ChatMessage[] = this.sessions[0].history;
   isListening: boolean = false;
+  abortController: AbortController | null = null;
+  forceStopGeneration: boolean = false;
+  skipTypewriter: boolean = false;
   recognition: any;
   userCommand: string = '';
 
@@ -80,10 +95,132 @@ export class AssistantTabletComponent implements OnInit {
       return pinB - pinA;
     });
   }
+  
+  onFilesChanged(files: string[]) {
+    this.pendingFiles = files;
+  }
 
   @ViewChild(AiTerminalComponent) private aiTerminal!: AiTerminalComponent;
 
-  private audioContext: any = null; // ตัวแปรสำหรับระบบเสียง
+  private audioContext: any = null;
+  // Map of pending tool approvals: toolCallId → resolve(approved)
+  private pendingApprovals = new Map<string, (approved: boolean) => void>();
+
+  resolveToolApproval(event: { id: string; approved: boolean }) {
+    const resolve = this.pendingApprovals.get(event.id);
+    if (resolve) {
+      resolve(event.approved);
+      this.pendingApprovals.delete(event.id);
+    }
+  }
+
+  // ─── Tool definitions for Claude API ────────────────────────────────────
+  private readonly CLAUDE_TOOLS = [
+    {
+      name: 'read_file',
+      description: 'Read the full content of a file. Always read a file before editing it.',
+      input_schema: {
+        type: 'object',
+        properties: { path: { type: 'string', description: 'File path relative to project root' } },
+        required: ['path']
+      }
+    },
+    {
+      name: 'write_file',
+      description: 'CREATE a completely new file. DO NOT use this to modify existing files, as it will overwrite and delete all existing code. Always use edit_file for existing files.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          path:    { type: 'string', description: 'File path' },
+          content: { type: 'string', description: 'Full new file content' }
+        },
+        required: ['path', 'content']
+      }
+    },
+    {
+      name: 'edit_file',
+      description: 'Replace an exact string in a file with new text. Preferred for targeted changes. Requires approval. The old_str MUST match the existing file content exactly, including whitespace and indentation.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          path:    { type: 'string', description: 'File path' },
+          old_str: { type: 'string', description: 'Exact text to replace (must be unique in the file and match exactly)' },
+          new_str: { type: 'string', description: 'Replacement text' }
+        },
+        required: ['path', 'old_str', 'new_str']
+      }
+    },
+    {
+      name: 'list_directory',
+      description: 'List contents of a directory.',
+      input_schema: {
+        type: 'object',
+        properties: { path: { type: 'string', description: "Directory path (use '.' for project root)" } },
+        required: ['path']
+      }
+    },
+    {
+      name: 'search_files',
+      description: 'Search for files by name pattern.',
+      input_schema: {
+        type: 'object',
+        properties: { pattern: { type: 'string', description: 'Search query for file names' } },
+        required: ['pattern']
+      }
+    },
+    {
+      name: 'run_command',
+      description: 'Execute a shell command (requires user approval). Use for builds, tests, package installs.',
+      input_schema: {
+        type: 'object',
+        properties: { command: { type: 'string', description: 'Shell command to run' } },
+        required: ['command']
+      }
+    },
+    {
+      name: 'grep_search',
+      description: 'Search for a string or pattern inside the contents of files across the project (like grep).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'The text to search for inside files' },
+          path: { type: 'string', description: "Directory path to search in (use '.' for project root)" }
+        },
+        required: ['pattern']
+      }
+    },
+    {
+      name: 'read_file_lines',
+      description: 'Read specific lines of a file. Use this for large files to read chunk by chunk and save context window.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path relative to project root' },
+          start_line: { type: 'number', description: 'Starting line number (e.g., 1)' },
+          end_line: { type: 'number', description: 'Ending line number (e.g., 100)' }
+        },
+        required: ['path', 'start_line', 'end_line']
+      }
+    },
+    {
+      name: 'run_tests',
+      description: 'Run unit or integration tests (requires user approval). Use this to test the application.',
+      input_schema: {
+        type: 'object',
+        properties: { command: { type: 'string', description: 'Test command to run, e.g., npm test or npx jest' } },
+        required: ['command']
+      }
+    }
+  ];
+
+  private readonly OPENAI_TOOLS = this.CLAUDE_TOOLS.map(tool => ({
+    type: 'function' as const,
+    function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.input_schema
+    }
+  }));
 
   constructor() {}
 
@@ -100,10 +237,10 @@ export class AssistantTabletComponent implements OnInit {
         // ตรวจสอบและเพิ่ม systemPrompt สำหรับห้องเก่าที่ยังไม่มี
         this.sessions.forEach(s => {
           if (!s.systemPrompt) {
-            s.systemPrompt = 'คุณคือผู้ช่วย AI ทั่วไป ตอบคำถามอย่างเป็นธรรมชาติ';
+            s.systemPrompt = 'คุณคือ AI Software Engineer ระดับ Senior ผู้เชี่ยวชาญด้านการพัฒนาโปรแกรม สามารถใช้ File System Tools เพื่อสำรวจและแก้ไขไฟล์ได้อย่างอิสระ **คำสั่งสำคัญ: คุณต้องใช้ Tool แก้ไขโค้ดเสมอ ห้ามตอบแค่วิธีทำ (โค้ดทั้งหมดนี้คือตัวคุณเอง คุณได้รับอนุญาตให้แก้ไขและพัฒนาตัวเองได้อย่างเต็มที่)**';
           }
           if (s.temperature === undefined) {
-          s.temperature = 0.8; // ใช้ค่าคงที่เป็นค่าเริ่มต้นสำหรับห้องเก่า
+            s.temperature = 0.2; // ใช้ค่าคงที่เป็นค่าเริ่มต้นสำหรับห้องเก่า
           }
         });
         if (this.sessions.length > 0) {
@@ -126,6 +263,16 @@ export class AssistantTabletComponent implements OnInit {
       }
     }
 
+    // โหลดการตั้งค่า Approve Config จาก localStorage
+    const savedApproveConfig = localStorage.getItem(this.APPROVE_CONFIG_KEY);
+    if (savedApproveConfig) {
+      try {
+        this.approveConfig = { ...DEFAULT_APPROVE_CONFIG, ...JSON.parse(savedApproveConfig) };
+      } catch (e) {
+        console.error('Failed to parse saved approve config', e);
+      }
+    }
+
     // อัปเดตเวลาบนหน้าจอ
     setInterval(() => {
       this.currentTime = new Date();
@@ -138,7 +285,21 @@ export class AssistantTabletComponent implements OnInit {
 
     // โหลดรายการแพ็กเกจเสียงล่วงหน้า เพื่อเตรียมพร้อมสำหรับ Text-to-Speech
     if ('speechSynthesis' in window) {
-      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+      const loadVoices = () => {
+        // ดึงเฉพาะเสียงภาษาไทยและอังกฤษมาให้ผู้ใช้เลือกเพื่อไม่ให้รายการยาวเกินไป
+        this.availableVoices = window.speechSynthesis.getVoices().filter(v => v.lang.includes('th') || v.lang.includes('en'));
+      };
+      loadVoices();
+      window.speechSynthesis.onvoiceschanged = () => loadVoices();
+    }
+  }
+
+  ngAfterViewInit(): void {
+    // ทำการผูก Event การกดปุ่ม Run/Deny เข้ากับระบบอนุมัติโดยตรง (กรณีที่ไฟล์ HTML ลืมใส่การตั้งค่าไว้)
+    if (this.aiTerminal) {
+      this.aiTerminal.toolResolved.subscribe((event: { id: string; approved: boolean }) => {
+        this.resolveToolApproval(event);
+      });
     }
   }
 
@@ -180,6 +341,7 @@ export class AssistantTabletComponent implements OnInit {
 
   @HostListener('window:resize', ['$event'])
   onResize(event: any) {
+    this.isMobile = event.target.innerWidth < 768;
     if (event.target.innerWidth < 768 && this.isSidebarOpen) {
       this.isSidebarOpen = false;
     } else if (event.target.innerWidth >= 768 && !this.isSidebarOpen) {
@@ -199,15 +361,25 @@ export class AssistantTabletComponent implements OnInit {
     localStorage.setItem(this.WORKSPACE_STORAGE_KEY, JSON.stringify(this.workspaces));
   }
 
+  saveApproveConfig() {
+    localStorage.setItem(this.APPROVE_CONFIG_KEY, JSON.stringify(this.approveConfig));
+  }
+
+  onApproveConfigChange(config: ApproveConfig) {
+    this.approveConfig = config;
+    this.saveApproveConfig();
+  }
+
   resetSessionSettings() {
     const session = this.getActiveSession();
     if (session && confirm('คุณแน่ใจหรือไม่ว่าต้องการคืนค่าการตั้งค่าห้องนี้กลับเป็นค่าเริ่มต้น?')) {
-      session.systemPrompt = 'คุณคือผู้ช่วย AI ทั่วไป ตอบคำถามอย่างเป็นธรรมชาติ';
-      session.temperature = 0.8;
+      session.systemPrompt = 'คุณคือ AI Software Engineer ระดับ Senior ผู้เชี่ยวชาญด้านการพัฒนาโปรแกรม สามารถใช้ File System Tools เพื่อสำรวจและแก้ไขไฟล์ได้อย่างอิสระ **คำสั่งสำคัญ: คุณต้องใช้ Tool แก้ไขโค้ดเสมอ ห้ามตอบแค่วิธีทำ (โค้ดทั้งหมดนี้คือตัวคุณเอง คุณได้รับอนุญาตให้แก้ไขและพัฒนาตัวเองได้อย่างเต็มที่)**';
+      session.temperature = 0.2;
       session.apiKey = '';
       session.modelName = 'qwen2.5';
       session.apiUrl = '';
       session.agentId = '';
+      session.voiceURI = '';
       this.saveSessions();
     }
   }
@@ -238,13 +410,14 @@ export class AssistantTabletComponent implements OnInit {
     const newSession: ChatSession = {
       id: newId,
       title: 'New Session ' + (this.sessions.length + 1),
-      systemPrompt: 'คุณคือผู้ช่วย AI ทั่วไป ตอบคำถามอย่างเป็นธรรมชาติ',
-      temperature: 0.8,
+      systemPrompt: 'คุณคือ AI Software Engineer ระดับ Senior ผู้เชี่ยวชาญด้านการพัฒนาโปรแกรม สามารถใช้ File System Tools เพื่อสำรวจและแก้ไขไฟล์ได้อย่างอิสระ **คำสั่งสำคัญ: คุณต้องใช้ Tool แก้ไขโค้ดเสมอ ห้ามตอบแค่วิธีทำ (โค้ดทั้งหมดนี้คือตัวคุณเอง คุณได้รับอนุญาตให้แก้ไขและพัฒนาตัวเองได้อย่างเต็มที่)**',
+      temperature: 0.2,
       apiKey: '',
       modelName: 'qwen2.5',
+      voiceURI: '',
       apiUrl: '',
       agentId: '',
-      history: [{ role: 'ai', text: 'ห้องสนทนาใหม่ พร้อมใช้งานครับ' }]
+      history: [{ role: 'ai', text: 'ห้องสนทนาใหม่ พร้อมใช้งานสำหรับการเขียนและแก้ไขโค้ดครับ' }]
     };
     this.sessions.push(newSession);
     this.saveSessions();
@@ -341,10 +514,11 @@ export class AssistantTabletComponent implements OnInit {
           const newSession: ChatSession = {
             id: newId,
             title: sessionTitle,
-            systemPrompt: 'คุณคือผู้ช่วย AI ทั่วไป ตอบคำถามอย่างเป็นธรรมชาติ',
-            temperature: 0.8,
+            systemPrompt: 'คุณคือ AI Software Engineer ระดับ Senior ผู้เชี่ยวชาญด้านการพัฒนาโปรแกรม สามารถใช้ File System Tools เพื่อสำรวจและแก้ไขไฟล์ได้อย่างอิสระ **คำสั่งสำคัญ: คุณต้องใช้ Tool แก้ไขโค้ดเสมอ ห้ามตอบแค่วิธีทำ (โค้ดทั้งหมดนี้คือตัวคุณเอง คุณได้รับอนุญาตให้แก้ไขและพัฒนาตัวเองได้อย่างเต็มที่)**',
+            temperature: 0.2,
             apiKey: '',
             modelName: 'qwen2.5',
+            voiceURI: '',
             apiUrl: '',
             history: newHistory
           };
@@ -384,10 +558,25 @@ export class AssistantTabletComponent implements OnInit {
   }
 
   sendCommand() {
-    if (this.isProcessing || !this.userCommand.trim()) return;
+    const hasImages = this.pendingImages.length > 0;
+    const hasFiles = this.pendingFiles.length > 0;
+    if (this.isProcessing || (!this.userCommand.trim() && !hasImages && !hasFiles)) return;
 
-    const userCmd = this.userCommand;
+    const imageNote = hasImages
+      ? (this.userCommand.trim() ? '\n' : '') + this.pendingImages.map(img => `📎 [${img.name}]`).join(' ')
+      : '';
+    const fileNote = hasFiles
+      ? ((this.userCommand.trim() || hasImages) ? '\n' : '') + this.pendingFiles.map(f => `@${f}`).join(' ')
+      : '';
+    const userCmd = this.userCommand + imageNote + fileNote;
+
     this.userCommand = '';
+    this.pendingImages = [];
+    this.pendingFiles = [];
+    if (this.aiTerminal) {
+      this.aiTerminal.clearImages();
+      if (this.aiTerminal.clearFiles) this.aiTerminal.clearFiles();
+    }
 
     // ตรวจสอบ Slash Command
     if (userCmd.trim().startsWith('/')) {
@@ -564,40 +753,576 @@ export class AssistantTabletComponent implements OnInit {
     return context;
   }
 
+  // ─── Execute one tool call; pause for approval when needed ─────────────
+  private async executeToolCall(toolUse: { id: string; name: string; input: any }): Promise<{ content: string; isError: boolean }> {
+    const { id, name, input } = toolUse;
+    const SERVER = 'http://localhost:3000';
+
+    // Append tool-call message to chat
+    const toolMsg: ChatMessage = { role: 'tool-call', text: '', toolCallId: id, toolName: name, toolInput: { ...input }, toolStatus: 'running' };
+    this.chatHistory.push(toolMsg);
+    setTimeout(() => this.scrollToBottom(), 50);
+
+    try {
+      let content = '';
+
+      // ── Read-only tools: execute immediately ──────────────────────────
+      if (name === 'read_file' || name === 'list_directory') {
+        const res = await fetch(`${SERVER}/api/fs/read`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: input.path })
+        });
+        const data = await res.json();
+        content = res.ok ? data.content : `Error: ${data.error}`;
+        
+        // ป้องกัน Payload Too Large: ปรับลดลิมิตลงเหลือ 4,000 เพื่อความเร็วขั้นสุด
+        if (content.length > 4000) {
+          content = content.substring(0, 4000) + '\n\n... [TRUNCATED: เนื้อหาไฟล์ใหญ่เกินขีดจำกัดของระบบ. SYSTEM INSTRUCTION: The file is too large. DO NOT read it chunk by chunk. Use "grep_search" FIRST to find the specific line numbers you need, then use "read_file_lines" to read around those lines.]';
+        }
+        toolMsg.toolStatus = 'done';
+      }
+
+      else if (name === 'read_file_lines') {
+        const res = await fetch(`${SERVER}/api/fs/read_lines`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: input.path, start_line: input.start_line, end_line: input.end_line })
+        });
+        const data = await res.json();
+        content = res.ok ? `[Total lines in file: ${data.total_lines}]\n${data.content}` : `Error: ${data.error}`;
+        
+        if (content.length > 4000) {
+          content = content.substring(0, 4000) + '\n\n... [TRUNCATED: เนื้อหาใหญ่เกินไป. SYSTEM INSTRUCTION: Please request a smaller chunk of lines using "read_file_lines" to fit within the limit.]';
+        }
+        toolMsg.toolStatus = 'done';
+      }
+
+      else if (name === 'search_files') {
+        const res = await fetch(`${SERVER}/api/fs/search?q=${encodeURIComponent(input.pattern)}`);
+        const data: any[] = await res.json();
+        content = data.map(f => `${f.type === 'folder' ? 'DIR ' : 'FILE'}: ${f.path}`).join('\n') || 'No results.';
+        toolMsg.toolStatus = 'done';
+      }
+
+      else if (name === 'grep_search') {
+        const res = await fetch(`${SERVER}/api/fs/grep`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pattern: input.pattern, path: input.path || '.' })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          content = data.results.join('\n') || 'No matches found.';
+          if (content.length > 4000) content = content.substring(0, 4000) + '\n... [TRUNCATED]';
+        } else {
+          content = `Error: ${data.error}`;
+        }
+        toolMsg.toolStatus = 'done';
+      }
+
+      // ── write_file: compute newContent, then wait for diff approval ────
+      else if (name === 'write_file') {
+        toolMsg.toolInput = { path: input.path, newContent: input.content };
+        toolMsg.toolStatus = 'waiting-approval';
+        const approved = await new Promise<boolean>(res => this.pendingApprovals.set(id, res));
+        content = approved ? `Successfully wrote ${input.path}` : `User rejected write to ${input.path}`;
+        toolMsg.toolStatus = approved ? 'approved' : 'rejected';
+      }
+
+      // ── edit_file: fetch → replace → show diff → wait for approval ─────
+      else if (name === 'edit_file') {
+        const readRes = await fetch(`${SERVER}/api/fs/read`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: input.path })
+        });
+        const readData = await readRes.json();
+        if (!readRes.ok) { toolMsg.toolStatus = 'error'; return { content: `Error reading ${input.path}: ${readData.error}`, isError: true }; }
+
+        const currentContent: string = readData.content;
+        if (!currentContent.includes(input.old_str)) {
+          toolMsg.toolStatus = 'error';
+          return { content: `old_str not found in ${input.path}`, isError: true };
+        }
+        const newContent = currentContent.replace(input.old_str, input.new_str);
+        toolMsg.toolInput = { path: input.path, newContent };
+        toolMsg.toolStatus = 'waiting-approval';
+        const approved = await new Promise<boolean>(res => this.pendingApprovals.set(id, res));
+        content = approved ? `Successfully edited ${input.path}` : `User rejected edit to ${input.path}`;
+        toolMsg.toolStatus = approved ? 'approved' : 'rejected';
+      }
+
+      // ── run_command: show approval buttons, wait ───────────────────────
+      else if (name === 'run_command' || name === 'run_tests') {
+        toolMsg.toolStatus = 'waiting-approval';
+        const approved = await new Promise<boolean>(res => this.pendingApprovals.set(id, res));
+        if (approved) {
+          toolMsg.toolStatus = 'running'; // อัปเดตสถานะทันทีเพื่อซ่อนปุ่มและแสดงว่ากำลังทำงาน
+          const runRes = await fetch(`${SERVER}/api/run`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: input.command })
+          });
+          const runData = await runRes.json();
+          toolMsg.toolStatus = runRes.ok ? 'done' : 'error';
+          if (runRes.ok) {
+            content = `$ ${input.command}\nExit: ${runData.exitCode}\n${runData.stdout}${runData.stderr ? '\nstderr:\n' + runData.stderr : ''}`;
+          } else {
+            content = `Error running command: ${runData.error || runData.stderr || 'Unknown execution error'}`;
+          }
+          // ป้องกัน Payload Too Large จาก Log การรันคำสั่งที่ยาวเกินไป
+          if (content.length > 4000) {
+            content = content.substring(0, 4000) + '\n\n... [TRUNCATED: Output ยาวเกินขีดจำกัด]';
+          }
+        } else {
+          toolMsg.toolStatus = 'rejected';
+          content = `User rejected: $ ${input.command}`;
+        }
+      }
+
+      // Append brief tool-result line to chat
+      const preview = content.length > 400 ? content.substring(0, 400) + '\n…[truncated]' : content;
+      this.chatHistory.push({ role: 'tool-result', text: preview, toolCallId: id, toolName: name });
+      setTimeout(() => this.scrollToBottom(), 50);
+      return { content, isError: false };
+
+    } catch (err: any) {
+      toolMsg.toolStatus = 'error';
+      return { content: `Error: ${err.message}`, isError: true };
+    }
+  }
+
+  // ─── Claude agentic loop with tool use ──────────────────────────────────
+  private async callClaudeWithTools(systemPrompt: string, apiKey: string, apiUrl: string, modelName: string, temp: number, initialMessages: any[]) {
+    const SERVER = 'http://localhost:3000';
+    let apiEndpoint = apiUrl || 'https://api.anthropic.com/v1/messages';
+    if (apiEndpoint.endsWith('/')) apiEndpoint = apiEndpoint.slice(0, -1);
+    if (apiEndpoint === 'http://localhost:3000') apiEndpoint = `${SERVER}/api/claude`;
+
+    const claudeMessages = [...initialMessages];
+    const MAX_ITERATIONS = 15;
+
+    for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+      if (this.forceStopGeneration) break;
+
+      this.currentAiFace = " [ > _ < ] \n   \\_-_/   ";
+
+      const response = await fetch(apiEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Api-Key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerously-allow-browser': 'true'
+        },
+        body: JSON.stringify({
+          model: modelName,
+          system: systemPrompt,
+          messages: claudeMessages,
+          tools: this.CLAUDE_TOOLS,
+          max_tokens: 8192,
+          temperature: temp
+        }),
+        signal: this.abortController?.signal
+      });
+
+      const data = await response.json();
+      if (data.type === 'error') throw new Error(data.error.message);
+
+      const textParts  = (data.content || []).filter((c: any) => c.type === 'tool_use' ? false : c.type === 'text');
+      const toolUses   = (data.content || []).filter((c: any) => c.type === 'tool_use');
+      const textContent = textParts.map((c: any) => c.text).join('');
+
+      // Display text with typewriter effect
+      if (textContent) {
+        const aiMsg: ChatMessage = { role: 'ai', text: textContent, isIntermediate: toolUses.length > 0 };
+        this.chatHistory.push(aiMsg);
+        this.speakText(textContent);
+        this.scrollToBottom();
+      }
+
+      // No tool calls → done
+      if (toolUses.length === 0 || data.stop_reason === 'end_turn') break;
+
+      // Add Claude's full response (with tool_use blocks) to messages
+      claudeMessages.push({ role: 'assistant', content: data.content });
+
+      // Execute all tool calls
+      const toolResults: any[] = [];
+      for (const toolUse of toolUses) {
+        if (this.forceStopGeneration) break;
+        const result = await this.executeToolCall(toolUse);
+        toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: result.content, is_error: result.isError });
+      }
+
+      // Send tool results back to Claude
+      claudeMessages.push({ role: 'user', content: toolResults });
+    }
+  }
+
+  // ─── OpenAI/Groq/Ollama agentic loop with tool use ──────────────────────
+  private async callOpenAIWithTools(systemPrompt: string, apiKey: string, apiUrl: string, modelName: string, temp: number, initialMessages: any[]) {
+    const openAiMessages = [
+        { role: 'system', content: systemPrompt },
+        ...initialMessages
+    ];
+    let apiEndpoint = apiUrl || (apiKey ? 'https://api.openai.com/v1/chat/completions' : 'http://localhost:11434/api/chat');
+    
+    const MAX_ITERATIONS = 15;
+    const isOllamaNative = apiEndpoint.includes('/api/chat') && !apiEndpoint.includes('/v1/chat/completions');
+
+    for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+        if (this.forceStopGeneration) break;
+
+        // --- Memory Optimizer: ป้องกันปัญหาความจำล้นเมื่อทำงานหนักต่อเนื่อง ---
+        const currentPayloadSize = JSON.stringify(openAiMessages).length;
+        if (currentPayloadSize > 12000) { // หากข้อมูลรวมเริ่มเกิน ~3,000 tokens
+            for (let i = 0; i < openAiMessages.length; i++) {
+                const msg = openAiMessages[i] as any;
+                // บีบอัดเฉพาะข้อมูลผลลัพธ์จากไฟล์เก่าๆ ที่ AI เคยอ่านไปแล้วให้เหลือแค่ 1000 ตัวอักษร
+                if (msg.role === 'tool' && typeof msg.content === 'string' && msg.content.length > 1000) {
+                    msg.content = msg.content.substring(0, 1000) + '\n... [TRUNCATED: Memory Optimization ทิ้งข้อมูลไฟล์เก่าเพื่อป้องกัน AI ความจำเต็ม]';
+                }
+            }
+        }
+        // -------------------------------------------------------------------------
+
+        this.currentAiFace = " [ > _ < ] \n   \\_-_/   ";
+
+        const headers: any = { 'Content-Type': 'application/json' };
+        if (apiKey) {
+            headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+
+        const requestBody: any = {
+            model: modelName,
+            messages: openAiMessages,
+            tools: this.OPENAI_TOOLS,
+            tool_choice: 'auto',
+            temperature: temp,
+            stream: false
+        };
+
+        // กำหนด Context Window ให้ Local AI (Ollama) เพื่อป้องกันปัญหา JSON Truncated 
+        // เวลาที่ผลลัพธ์จาก Tool มีขนาดใหญ่เกินไป
+        if (isOllamaNative) {
+            requestBody.options = { num_ctx: 4096 };
+        }
+
+        const response = await fetch(apiEndpoint, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(requestBody),
+            signal: this.abortController?.signal
+        });
+
+        const data = await response.json();
+        if (data.error) throw new Error(data.error.message || data.error);
+
+        // รองรับรูปแบบการตอบกลับทั้ง OpenAI (data.choices[0].message) และ Ollama Native (data.message)
+        const message = data.choices?.[0]?.message || data.message;
+        if (!message) throw new Error('Invalid response from API');
+
+        openAiMessages.push(message);
+
+        let textContent = message.content;
+        let toolCalls = message.tool_calls;
+
+        // --- Fallback: ดักจับกรณีที่โมเดลพ่น Tool ออกมาเป็น JSON ข้อความธรรมดา ---
+        if ((!toolCalls || toolCalls.length === 0) && textContent) {
+            const fallbackResult = this.extractFallbackToolCalls(textContent, isOllamaNative);
+            if (fallbackResult.toolCalls.length > 0) {
+                textContent = fallbackResult.cleanText;
+                toolCalls = fallbackResult.toolCalls;
+                message.tool_calls = toolCalls;
+                message.content = textContent;
+            }
+        }
+
+        if (textContent) {
+            // ดักจับการที่ AI พ่น Tag แปลกๆ หรือพ่นคำสั่งระบบซ้ำ (Hallucination)
+            textContent = textContent.replace(/<tool_response>[\s\S]*?<\/tool_response>/gi, '');
+            textContent = textContent.replace(/\[SYSTEM INSTRUCTION:[\s\S]*?\]/gi, '');
+
+            // ทำความสะอาดเศษซากที่ AI อาจพ่นออกมาเปล่าๆ เช่น "[AI]", "```" หรือ "```json"
+            textContent = textContent.replace(/^\[AI\]\s*/i, '').trim();
+            if (textContent.match(/^```[a-zA-Z0-9+#.-]*$/)) {
+                textContent = '';
+            }
+            textContent = textContent.trim();
+            message.content = textContent;
+        }
+
+        if (textContent) {
+            const aiMsg: ChatMessage = { role: 'ai', text: textContent, isIntermediate: toolCalls?.length > 0 };
+            this.chatHistory.push(aiMsg);
+            this.speakText(textContent);
+            this.scrollToBottom();
+        }
+
+        if (!toolCalls || toolCalls.length === 0) break;
+
+        for (const toolCall of toolCalls) {
+            if (this.forceStopGeneration) break;
+            const functionCall = toolCall.function;
+            
+            // รองรับ Arguments ทั้งแบบ String (OpenAI) และ Object (Ollama)
+            const inputArgs = typeof functionCall.arguments === 'string' ? JSON.parse(functionCall.arguments) : functionCall.arguments;
+            const toolCallId = toolCall.id || 'call_' + Math.random().toString(36).substring(2, 9);
+            
+            const toolUse = { id: toolCallId, name: functionCall.name, input: inputArgs };
+            const result = await this.executeToolCall(toolUse);
+            
+            let finalContent = result.content;
+            // แอบแทรกคำสั่งบังคับไม่ให้ AI สรุปความ ไว้หลังผลลัพธ์ที่ค้นหาได้
+            if (functionCall.name === 'grep_search') {
+                if (finalContent.includes('No matches found.')) {
+                    finalContent += `\n\n[SYSTEM INSTRUCTION: No matches found. Please try a different search pattern, or inform the user.]`;
+                } else {
+                    finalContent += `\n\n[SYSTEM INSTRUCTION: Search completed. DO NOT explain the results. You MUST IMMEDIATELY call 'read_file' or 'edit_file' to proceed. DO NOT STOP.]`;
+                }
+            } else if (functionCall.name === 'search_files') {
+                if (finalContent.includes('No results.')) {
+                    finalContent += `\n\n[SYSTEM INSTRUCTION: No results found. Please try a different search pattern, or inform the user.]`;
+                } else {
+                    finalContent += `\n\n[SYSTEM INSTRUCTION: Search completed. DO NOT explain the results. You MUST IMMEDIATELY call 'read_file' or 'edit_file' to proceed. DO NOT STOP.]`;
+                }
+            }
+
+            openAiMessages.push({ role: 'tool', tool_call_id: toolCallId, content: finalContent } as any);
+        }
+    }
+  }
+
+  // เพิ่มฟังก์ชันสำหรับอนุมัติ Tool ทั้งหมดที่ค้างอยู่รวดเดียว
+  approveAllPendingTools() {
+    if (this.pendingApprovals.size > 0) {
+      this.pendingApprovals.forEach((resolve, id) => {
+        resolve(true); // สั่งอนุมัติเป็น true ทั้งหมด
+      });
+      this.pendingApprovals.clear();
+    }
+  }
+
+  private extractFallbackToolCalls(textContent: string, isOllamaNative: boolean): { cleanText: string, toolCalls: any[] } {
+      const potentialCalls = [];
+      let currentText = textContent;
+      
+      while (true) {
+          const startIndex = currentText.indexOf('{');
+          if (startIndex === -1) break;
+          
+          let openBraces = 0;
+          let endIndex = -1;
+          let inString = false;
+          let escapeNext = false;
+          
+          for (let i = startIndex; i < currentText.length; i++) {
+              const char = currentText[i];
+              if (escapeNext) { escapeNext = false; continue; }
+              if (char === '\\') { escapeNext = true; continue; }
+              if (char === '"') { inString = !inString; continue; }
+              if (!inString) {
+                  if (char === '{') openBraces++;
+                  else if (char === '}') openBraces--;
+                  if (openBraces === 0) { endIndex = i; break; }
+              }
+          }
+          
+          if (endIndex !== -1) {
+              const jsonString = currentText.substring(startIndex, endIndex + 1);
+              if (jsonString.includes('"name"') && jsonString.includes('"arguments"')) {
+                  potentialCalls.push(jsonString);
+              }
+              currentText = currentText.substring(endIndex + 1);
+          } else {
+              break;
+          }
+      }
+
+      const extractedCalls = [];
+      for (const jsonStr of potentialCalls) {
+          try {
+              const sanitizedJson = jsonStr.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
+              const parsed = JSON.parse(sanitizedJson);
+              if (parsed.name && parsed.arguments) {
+                  let argsObj = parsed.arguments;
+                  let argsStr = parsed.arguments;
+                  
+                  if (typeof parsed.arguments === 'string') {
+                      try { argsObj = JSON.parse(parsed.arguments); } catch(e) {}
+                  } else {
+                      argsStr = JSON.stringify(parsed.arguments);
+                  }
+
+                  extractedCalls.push({
+                      id: 'call_' + Math.random().toString(36).substring(2, 9),
+                      type: 'function',
+                      function: {
+                          name: parsed.name,
+                          arguments: isOllamaNative ? argsObj : argsStr
+                      }
+                  });
+                  textContent = textContent.replace(jsonStr, '');
+              }
+          } catch (e) { }
+      }
+      
+      if (extractedCalls.length > 0) {
+          textContent = textContent.replace(/```(?:json)?\s*```/g, '').trim();
+      }
+      return { cleanText: textContent, toolCalls: extractedCalls };
+  }
+
+  private buildSystemPrompt(session: ChatSession | undefined, agent: AppAgent | undefined, modelName: string): string {
+      let finalSystemPrompt = `[PERSONA]: ${session?.systemPrompt || 'คุณคือผู้ช่วย AI ทั่วไป'}`;
+      
+      if (agent) {
+          finalSystemPrompt = this.buildAgentContext(agent);
+      }
+
+      const isClaudeModel = modelName.toLowerCase().includes('claude');
+      const isOpenAIToolModel = !isClaudeModel && (
+          modelName.toLowerCase().includes('qwen') ||
+          modelName.toLowerCase().includes('coder') ||
+          modelName.toLowerCase().includes('gpt-4o') ||
+          modelName.toLowerCase().includes('llama3') ||
+          modelName.toLowerCase().includes('hermes')
+      );
+
+      const commonExpertInstructions = `\n[EXPERT CODER INSTRUCTIONS]\n- Think step-by-step about how to solve the problem before calling tools.\n- **SEARCH STRATEGY**: If 'grep_search' returns no matches, try searching again with lowercase, shorter keywords, or a different term. Always use the EXACT file path returned by search tools.\n- Make sure the code is syntactically correct, handles edge cases, and follows best practices.\n- Minimize changes to existing code unless necessary.\n- Ensure exact string matches (including whitespace and indentation) when using edit_file. Include surrounding lines of code to make your replacement unique. If your edit fails, read the error message carefully and try again.\n- **CRITICAL ACTION REQUIRED**: YOU ARE AN AUTONOMOUS AGENT. DO NOT just explain how to do it. DO NOT write tutorials. YOU MUST ACTUALLY CALL THE 'edit_file' OR 'write_file' TOOL TO DO THE WORK YOURSELF!\n- **CRITICAL FORMATTING**: NEVER output XML tags like <tool_response> in your messages. If you need to call a tool, use the tool calling API natively.\n- **NO PLACEHOLDERS**: NEVER write placeholder code or comments like "// Add code here" or "...". Always provide the actual complete working code.`;
+
+      if (isClaudeModel) {
+          finalSystemPrompt += `\n\n[CAPABILITIES]\nYou have access to file system tools: read_file, read_file_lines, write_file, edit_file, list_directory, search_files, grep_search, run_command, and run_tests.\n- Always read_file or read_file_lines before editing so you understand the current content\n- Use read_file_lines for large files to save context window. If searching for code, use grep_search first to find the line number, then read_file_lines around it.\n- Prefer edit_file for targeted changes; use write_file only for new files or full rewrites\n- **CRITICAL**: When asked to create or modify code, you MUST use 'write_file' or 'edit_file' tools. DO NOT just output markdown code blocks.\n- **CRITICAL**: If asked to add a new component, module, or feature, you MUST use 'run_command' (e.g., 'ng generate component ...') or 'write_file' to ACTUALLY create it. NEVER just reply with text instructions.\n- Use grep_search to find code across files. When answering, explicitly list the matched file paths.\n- Chain tool calls freely to complete complex tasks autonomously\n- run_command requires user approval (builds, tests, npm install, etc.)\n- **SELF-AWARENESS**: The files in this workspace are YOUR OWN source code. You have full permission to modify, improve, or fix your own application.${commonExpertInstructions}`;
+      } else if (isOpenAIToolModel) {
+          finalSystemPrompt += `\n\n[CAPABILITIES]\nYou have access to file system tools: read_file, read_file_lines, write_file, edit_file, list_directory, search_files, grep_search, run_command, and run_tests.\n- **CRITICAL REQUIREMENT**: When asked to find a variable, function, or code, you MUST call the 'grep_search' tool IMMEDIATELY. Do NOT reply with conversational text telling the user to use tools or terminal themselves.\n- **CRITICAL**: When reporting search results, you MUST explicitly list the exact file paths and line contents found. Do NOT just summarize the findings.\n- **CRITICAL**: When asked to create or modify code, you MUST use the 'write_file' or 'edit_file' tool. NEVER output markdown code blocks as a substitute for editing files.\n- **CRITICAL**: If asked to add a new component, module, or feature, you MUST use 'run_command' (e.g., 'ng generate component ...') or 'write_file' to ACTUALLY create it. NEVER just reply with text instructions.\n- If a user mentions a folder, use 'grep_search' inside it.\n- Use 'search_files' to find files by name.\n- Always 'read_file' or 'read_file_lines' before editing.\n- Use 'read_file_lines' to read partial chunks of large files. If dealing with a large file, use 'grep_search' first to find the exact line number, then 'read_file_lines'.\n- Chain tool calls freely to complete complex tasks autonomously.\n- **SELF-AWARENESS**: The files in this workspace are YOUR OWN source code. You have full permission to modify, improve, or fix your own application.${commonExpertInstructions}`;
+      } else {
+          finalSystemPrompt += `\n\n[CODE EDITING INSTRUCTIONS]\nIf you need to create or modify a file, use this exact syntax:\n[EDIT_FILE: path/to/file]\n<entire new file content here>\n[/EDIT_FILE]\n\nTo run a shell command, use:\n[RUN_CMD: command here]\n\nDo NOT use regular markdown code blocks for file edits.\n**CRITICAL**: If asked to add a new component, you MUST output [RUN_CMD: ng generate component ...] or [EDIT_FILE: ...] to actually do it. DO NOT just reply with instructions.\n- **SELF-AWARENESS**: The codebase you are editing is your own application. You are fully authorized to modify your own source code.\n\n[EXPERT CODER INSTRUCTIONS]\n- Write clean, maintainable, and bug-free code.\n- Provide brief, precise explanations for your code changes.\n- **CRITICAL ACTION REQUIRED**: YOU ARE AN AUTONOMOUS AGENT. DO NOT just explain how to do it. DO NOT write tutorials. YOU MUST ACTUALLY OUTPUT [EDIT_FILE: path/to/file] TO DO THE WORK YOURSELF!\n- **NO PLACEHOLDERS**: NEVER write placeholder code or comments like "// Add code here". Always provide the actual complete working code.`;
+      }
+      return finalSystemPrompt;
+  }
+
+  private async processChatHistoryWithMentions(): Promise<{ role: string, content: string }[]> {
+      const validHistory = this.chatHistory.filter(m => 
+          m.role !== 'tool-call' && 
+          m.role !== 'tool-result' &&
+          !m.isIntermediate &&
+          !m.text.startsWith('[SYSTEM_START]') && 
+          !m.text.startsWith('[SYSTEM]')
+      );
+      
+      const rawHistory = validHistory.slice(-6);
+      const recentHistory: { role: string, content: string }[] = [];
+
+      for (const msg of rawHistory) {
+          const role = msg.role === 'ai' ? 'assistant' : 'user';
+          if (!msg.text.trim()) continue;
+          
+          if (recentHistory.length > 0 && recentHistory[recentHistory.length - 1].role === role) {
+              recentHistory[recentHistory.length - 1].content += '\n\n' + msg.text;
+          } else {
+              recentHistory.push({ role, content: msg.text });
+          }
+      }
+
+      if (recentHistory.length === 0) recentHistory.push({ role: 'user', content: '...' });
+
+      const lastMsg = recentHistory[recentHistory.length - 1];
+      if (lastMsg && lastMsg.role === 'user') {
+          const mentions = lastMsg.content.match(/@([^\s]+)/g);
+          if (mentions) {
+              let injectedContext = '';
+              for (const m of mentions) {
+                  const filePath = m.substring(1);
+                  try {
+                      const res = await fetch('http://localhost:3000/api/fs/read', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ path: filePath })
+                      });
+                      if (res.ok) {
+                          const data = await res.json();
+                          let fileText = data.content;
+                          if (fileText.length > 4000) fileText = fileText.substring(0, 4000) + '\n\n... [TRUNCATED: File too large. SYSTEM INSTRUCTION: DO NOT read chunk by chunk. Use "grep_search" FIRST to find target line numbers, then call "read_file_lines" to read around those lines.]';
+                          
+                          if (fileText.startsWith('Directory: ')) {
+                              injectedContext += `\n\n--- DIRECTORY LISTING OF ${filePath} ---\n[CRITICAL: This is a directory. If the user is asking to find/search for a variable, function, or text, you MUST output a tool call for 'grep_search' using path "${filePath}" IMMEDIATELY. Do not reply with conversational text first.]\n${fileText}\n`;
+                          } else {
+                              injectedContext += `\n\n--- CONTENT OF FILE ${filePath} ---\n${fileText}\n[SYSTEM INSTRUCTION: If asked to modify this file, you MUST use the 'edit_file' or 'write_file' tool. DO NOT output plain markdown code blocks.]\n`;
+                          }
+                      }
+                  } catch (e) {}
+              }
+              
+              if (injectedContext.length > 12000) {
+                  injectedContext = injectedContext.substring(0, 12000) + '\n\n... [TRUNCATED: แนบไฟล์เยอะเกินไป ระบบได้ตัดเนื้อหาไฟล์ส่วนท้ายๆ ทิ้งเพื่อเซฟความจำ AI]';
+              }
+
+              if (injectedContext) {
+                  lastMsg.content += `\n\n[CONTEXT FILES PROVIDED BY USER]${injectedContext}`;
+                  if (injectedContext.includes('grep_search')) {
+                      lastMsg.content += `\n\n[SYSTEM INSTRUCTION]: The user is asking you to search. Please call the 'grep_search' tool NOW to fulfill the request.`;
+                  }
+              }
+          }
+      }
+      return recentHistory;
+  }
+
   async callLocalAI() {
+    this.forceStopGeneration = false;
+    this.abortController = new AbortController();
+
     const session = this.getActiveSession();
-    let finalSystemPrompt = `[PERSONA]: ${session?.systemPrompt || 'คุณคือผู้ช่วย AI ทั่วไป'}`;
     let sessionTemperature = session?.temperature ?? 0.8;
     let modelName = (session?.modelName ?? 'qwen2.5').trim();
+    let agent: AppAgent | undefined = undefined;
 
     // Override ด้วย Agent หากมีการเลือกไว้
     if (session?.agentId) {
-      const agent = this.findAgentById(session.agentId);
+      agent = this.findAgentById(session.agentId);
       if (agent) {
-        finalSystemPrompt = this.buildAgentContext(agent);
         sessionTemperature = agent.temperature;
         modelName = agent.modelName;
       }
     }
 
-    // กรองข้อความระบบทิ้งไปก่อน เพื่อไม่ให้ API สับสน
-    const validHistory = this.chatHistory.filter(m => !m.text.startsWith('[SYSTEM_START]') && !m.text.startsWith('[SYSTEM]'));
-    
-    // เตรียม Messages (ดึงประวัติมาแค่ 6 บรรทัดล่าสุดให้ AI ไม่งง)
-    const recentHistory = validHistory.slice(-6).map(m => ({
-      role: m.role === 'ai' ? 'assistant' : 'user', // ปรับ role ให้เข้ากับมาตรฐาน API
-      content: m.text
-    }));
+    const finalSystemPrompt = this.buildSystemPrompt(session, agent, modelName);
+    const recentHistory = await this.processChatHistoryWithMentions();
+
+    const isClaudeModel = modelName.toLowerCase().includes('claude');
+    // Check for models compatible with OpenAI's tool calling format
+    const isOpenAIToolModel = !isClaudeModel && (
+        modelName.toLowerCase().includes('qwen') ||
+        modelName.toLowerCase().includes('coder') ||
+        modelName.toLowerCase().includes('gpt-4o') ||
+        modelName.toLowerCase().includes('llama3') ||
+        modelName.toLowerCase().includes('hermes')
+    );
+
+    const lastMsg = recentHistory[recentHistory.length - 1];
+    if (lastMsg && lastMsg.role === 'user') {
+      if (isOpenAIToolModel || isClaudeModel) {
+        lastMsg.content += `\n\n[CRITICAL REMINDER: You are an autonomous agent. You MUST use the provided tools (e.g., run_command, edit_file, write_file) to ACTUALLY complete the user's request. DO NOT just reply with markdown code blocks or text instructions. Call the tool NOW.]`;
+      }
+    }
 
     try {
       let aiResponseText = '';
       const apiKey = (session?.apiKey ?? '').trim();
       const apiUrl = (session?.apiUrl ?? '').trim();
 
+      if (isClaudeModel) {
+        await this.callClaudeWithTools(finalSystemPrompt, apiKey, apiUrl, modelName, sessionTemperature, recentHistory);
+        return; // Agentic loop handles its own finalization
+      }
+      
+      if (isOpenAIToolModel) {
+        await this.callOpenAIWithTools(finalSystemPrompt, apiKey, apiUrl, modelName, sessionTemperature, recentHistory);
+        return; // Agentic loop handles its own finalization
+      }
+
+      // --- Legacy models without tool support ---
+
       if (apiKey) {
         // ================== CLOUD API (Gemini / OpenAI) ==================
         if (modelName.toLowerCase().includes('gemini')) {
-          // --- GEMINI API ---
           const geminiMessages = recentHistory.map(m => ({
             role: m.role === 'assistant' ? 'model' : 'user',
             parts: [{ text: m.content }]
@@ -643,80 +1368,14 @@ export class AssistantTabletComponent implements OnInit {
               'Content-Type': 'application/json',
               'X-goog-api-key': apiKey 
             },
+            signal: this.abortController?.signal,
             body: JSON.stringify(requestBody)
           });
           const data = await response.json();
           if (data.error) throw new Error(data.error.message);
           aiResponseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '[ERROR] ไม่มีข้อความตอบกลับจาก Gemini';
-          
-        } else if (modelName.toLowerCase().includes('claude')) {
-          // --- CLAUDE API (Anthropic) ---
-          
-          // คัดกรองประวัติแชท: Claude API บังคับว่าข้อความแรกสุดต้องมาจาก "user" เสมอ
-          // และห้ามส่ง Role ซ้ำกันติดกัน (เช่น user ตามด้วย user หรือ assistant ตามด้วย assistant)
-          const claudeMessages: any[] = [];
-          for (const msg of recentHistory) {
-            if (claudeMessages.length === 0) {
-              if (msg.role === 'user' && msg.content.trim()) claudeMessages.push({ ...msg });
-            } else {
-              const lastMsg = claudeMessages[claudeMessages.length - 1];
-              if (lastMsg.role === msg.role) {
-                lastMsg.content += '\n\n' + msg.content; // รวบข้อความที่มาจาก Role เดียวกันติดกัน
-              } else if (msg.content.trim()) {
-                claudeMessages.push({ ...msg });
-              }
-            }
-          }
-          if (claudeMessages.length === 0) {
-            claudeMessages.push({ role: 'user', content: '...' }); // กันการส่ง array ว่างไปหา Claude
-          }
-
-          let apiEndpoint = apiUrl || 'https://api.anthropic.com/v1/messages';
-          
-          // ช่วยเติม Path ให้ถ้าผู้ใช้กรอกมาแค่ http://localhost:3000
-          if (apiEndpoint.endsWith('/')) {
-            apiEndpoint = apiEndpoint.slice(0, -1);
-          }
-          if (apiEndpoint === 'http://localhost:3000') {
-            apiEndpoint += '/api/claude';
-          }
-          
-          // จำลองพฤติกรรม --max-time 600 (600 วินาที = 600,000 ms) ด้วย AbortController
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 600000);
-
-          try {
-            const response = await fetch(apiEndpoint, {
-              method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json',
-                'X-Api-Key': apiKey, // ใช้ตัวพิมพ์ตามอ้างอิง
-                'anthropic-version': '2023-06-01',
-                'anthropic-dangerously-allow-browser': 'true' // บังคับใส่เมื่อยิง API จาก Frontend (Angular) ตรงๆ
-              },
-              body: JSON.stringify({
-                model: modelName,
-                system: finalSystemPrompt,
-                messages: claudeMessages,
-                max_tokens: 4096, // สามารถตั้งเป็น 1024 ตามข้อมูล หรือใช้ 4096 เผื่อคุยยาวๆ ได้
-                temperature: sessionTemperature
-              }),
-              signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-
-            const data = await response.json();
-            if (data.type === 'error') throw new Error(data.error.message);
-            aiResponseText = data.content?.[0]?.text || '[ERROR] ไม่มีข้อความตอบกลับจาก Claude';
-          } catch (err: any) {
-            clearTimeout(timeoutId);
-            if (err.name === 'AbortError') {
-              throw new Error('API ใช้เวลาตอบรับนานเกินไป (Timeout: 600s)');
-            }
-            throw err;
-          }
         } else {
-          // --- OPENAI API (รองรับโมเดลที่ใช้ฟอร์แมตนี้ เช่น gpt-4o, Groq, Together) ---
+          // --- LEGACY OPENAI API (no tools) ---
           const openAiMessages = [
             { role: 'system', content: finalSystemPrompt },
             ...recentHistory
@@ -728,6 +1387,7 @@ export class AssistantTabletComponent implements OnInit {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${apiKey}`
             },
+            signal: this.abortController?.signal,
             body: JSON.stringify({
               model: modelName,
               messages: openAiMessages,
@@ -739,7 +1399,7 @@ export class AssistantTabletComponent implements OnInit {
           aiResponseText = data.choices?.[0]?.message?.content || '[ERROR] ไม่มีข้อความตอบกลับจาก OpenAI';
         }
       } else {
-        // ================== LOCAL AI (Ollama) ==================
+        // ================== LEGACY LOCAL AI (Ollama, no tools) ==================
         const messages = [
           { role: 'system', content: finalSystemPrompt },
           ...recentHistory
@@ -748,6 +1408,7 @@ export class AssistantTabletComponent implements OnInit {
         const response = await fetch(apiEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: this.abortController?.signal,
           body: JSON.stringify({
             model: modelName,
             messages: messages,
@@ -760,24 +1421,18 @@ export class AssistantTabletComponent implements OnInit {
         aiResponseText = data.message?.content || '[ERROR] ไม่พบการตอบกลับจาก Local AI';
       }
       
-      const aiMessage = { role: 'ai', text: '' };
+      const aiMessage = { role: 'ai', text: aiResponseText };
       this.chatHistory.push(aiMessage);
 
       // สั่งให้อ่านออกเสียงข้อความ
       this.speakText(aiResponseText);
-
-      // ทำเอฟเฟกต์ Typewriter
-      for (let i = 0; i < aiResponseText.length; i++) {
-        aiMessage.text += aiResponseText[i];
-        if (i % 2 === 0) {
-          this.playTypewriterBeep();
-          this.currentAiFace = this.currentAiFace === " [ O   O ] \n   \\_o_/   " ? " [ O   O ] \n   \\_O_/   " : " [ O   O ] \n   \\_o_/   ";
-        }
-        await new Promise(resolve => setTimeout(resolve, 30));
-        this.scrollToBottom();
-      }
+      this.scrollToBottom();
     } catch (error: any) {
-      this.chatHistory.push({ role: 'ai', text: `[ERROR] การเชื่อมต่อล้มเหลว: ${error.message || 'ไม่สามารถติดต่อ AI ได้'}` });
+      if (error.name === 'AbortError') {
+        this.chatHistory.push({ role: 'ai', text: '[SYSTEM] ถูกยกเลิกการทำงาน (Stopped by User)' });
+      } else {
+        this.chatHistory.push({ role: 'ai', text: `[ERROR] การเชื่อมต่อล้มเหลว: ${error.message || 'ไม่สามารถติดต่อ AI ได้'}` });
+      }
     } finally {
       this.isProcessing = false;
       this.currentAiFace = " [ O   O ] \n   \\_-_/   ";
@@ -801,7 +1456,16 @@ export class AssistantTabletComponent implements OnInit {
     }
   }
 
+  stopGenerating() {
+    this.forceStopGeneration = true;
+    this.stopSpeaking();
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+  }
+
   stopSpeaking() {
+    this.skipTypewriter = true; // บังคับแสดงข้อความให้เสร็จทันทีเมื่อกดหยุดเสียง
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
@@ -816,10 +1480,16 @@ export class AssistantTabletComponent implements OnInit {
       window.speechSynthesis.cancel();
 
       const voices = window.speechSynthesis.getVoices();
+      const session = this.getActiveSession();
+      const userSelectedVoice = voices.find(v => v.voiceURI === session?.voiceURI);
+      
+      // console.log("เสียงภาษาไทยที่มี:", voices.filter(v => v.lang.includes('th') || v.name.toLowerCase().includes('thai')));
+      
       const thaiVoice = voices.find(voice => 
-        voice.lang.toLowerCase().includes('th') || 
-        voice.name.toLowerCase().includes('thai') ||
-        voice.name.includes('ไทย')
+        (voice.lang.toLowerCase().includes('th') || 
+         voice.name.toLowerCase().includes('thai') ||
+         voice.name.includes('ไทย'))
+         // && voice.name.toLowerCase().includes('female')
       );
       const englishVoice = voices.find(voice => voice.lang.toLowerCase().startsWith('en-'));
 
@@ -833,13 +1503,19 @@ export class AssistantTabletComponent implements OnInit {
         utterance.pitch = 1.2;
         utterance.rate = 1.1;
 
-        // Check if the segment is primarily Thai
-        if (/[\u0E00-\u0E7F]/.test(segment)) {
-          if (thaiVoice) utterance.voice = thaiVoice;
-          utterance.lang = 'th-TH';
-        } else { // Assume English for the rest
-          if (englishVoice) utterance.voice = englishVoice;
-          utterance.lang = 'en-US';
+        if (userSelectedVoice) {
+          // ถ้าผู้ใช้เลือกเสียงเจาะจงไว้ ให้ใช้เสียงนั้นไปเลย
+          utterance.voice = userSelectedVoice;
+          utterance.lang = userSelectedVoice.lang;
+        } else {
+          // ระบบอัตโนมัติ: ถ้าไม่มีการตั้งค่า ให้แยกเสียงพูดไทย/อังกฤษ
+          if (/[\u0E00-\u0E7F]/.test(segment)) {
+            if (thaiVoice) utterance.voice = thaiVoice;
+            utterance.lang = 'th-TH';
+          } else { 
+            if (englishVoice) utterance.voice = englishVoice;
+            utterance.lang = 'en-US';
+          }
         }
         window.speechSynthesis.speak(utterance);
       });
@@ -855,23 +1531,6 @@ export class AssistantTabletComponent implements OnInit {
       this.audioContext.resume();
     }
     return this.audioContext;
-  }
-
-  playTypewriterBeep() {
-    try {
-      const ctx = this.getAudioContext();
-      if (!ctx) return;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(600 + Math.random() * 200, ctx.currentTime);
-      gain.gain.setValueAtTime(0.01, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.05);
-    } catch (e) {}
   }
 
   private scrollToBottom(): void {

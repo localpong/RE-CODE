@@ -108,6 +108,10 @@
                 <small style="color: rgba(0, 251, 255, 0.6); font-size: 0.7rem; margin-top: 5px; display: block;">> พิมพ์ /sys ตามด้วยข้อความในช่องแชท เพื่อเปลี่ยนนิสัยได้ทันที</small>
                 <button class="reset-btn session-reset" (click)="resetSessionSettings()">↺ Reset Session Settings</button>
               </div>
+              <app-approve-config
+                [config]="approveConfig"
+                (configChange)="onApproveConfigChange($event)">
+              </app-approve-config>
             </ng-container>
         </div>
 
@@ -126,10 +130,14 @@
           [chatHistory]="chatHistory"
           [isProcessing]="isProcessing"
           [isListening]="isListening"
+          [approveConfig]="approveConfig"
           [(userCommand)]="userCommand"
           (commandEntered)="sendCommand()"
           (toggleListen)="toggleListening()"
-          (stopAudio)="stopSpeaking()">
+          (stopAudio)="stopSpeaking()"
+          (stopGenerate)="stopGenerating()"
+          (imagesChanged)="onImagesChanged($event)"
+          (filesChanged)="onFilesChanged($event)">
         </app-ai-terminal>
       </div>
       

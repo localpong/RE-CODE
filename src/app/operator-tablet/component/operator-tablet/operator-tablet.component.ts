@@ -393,18 +393,10 @@ export class OperatorTabletComponent implements OnInit {
     
     this.speakText(response);
     
-    const aiMessage = { role: 'ai', text: '' };
+    const aiMessage = { role: 'ai', text: response };
     this.chatHistory.push(aiMessage);
     
-    for (let i = 0; i < response.length; i++) {
-      aiMessage.text += response[i];
-      if (i % 2 === 0) {
-        this.playTypewriterBeep();
-        this.currentAiFace = this.currentAiFace === this.FACES.talking ? " [ O   O ] \n   \\_O_/   " : this.FACES.talking;
-      }
-      await new Promise(resolve => setTimeout(resolve, 30));
-      this.scrollToBottom();
-    }
+    this.scrollToBottom();
     this.currentAiFace = this.FACES.idle;
     this.isProcessing = false;
   }
@@ -452,18 +444,10 @@ export class OperatorTabletComponent implements OnInit {
 
     this.speakText(response);
     
-    const aiMessage = { role: 'ai', text: '' };
+    const aiMessage = { role: 'ai', text: response };
     this.chatHistory.push(aiMessage);
     
-    for (let i = 0; i < response.length; i++) {
-      aiMessage.text += response[i];
-      if (i % 2 === 0) {
-        this.playTypewriterBeep();
-        this.currentAiFace = this.currentAiFace === this.FACES.talking ? " [ O   O ] \n   \\_O_/   " : this.FACES.talking;
-      }
-      await new Promise(resolve => setTimeout(resolve, 30));
-      this.scrollToBottom();
-    }
+    this.scrollToBottom();
     
     // จบเกมแล้วให้ GHOST-OS ทำหน้ามีความสุขค้างไว้
     this.currentAiFace = this.FACES.happy;
@@ -1567,8 +1551,7 @@ export class OperatorTabletComponent implements OnInit {
     // เอาข้อความ  ออกแล้วใส่คำตอบจริงจาก GHOST-OS
     this.chatHistory.pop();
     
-    // เอฟเฟกต์ Typewriter (พิมพ์ทีละตัวอักษร)
-    const aiMessage = { role: 'ai', text: '' };
+    const aiMessage = { role: 'ai', text: response };
     this.chatHistory.push(aiMessage);
     
     // สั่งให้ GHOST-OS พูดตอบกลับ (ยกเว้นถ้าเป็นแค่การเก็บของ)
@@ -1576,16 +1559,7 @@ export class OperatorTabletComponent implements OnInit {
       this.speakText(response);
     }
 
-    for (let i = 0; i < response.length; i++) {
-      aiMessage.text += response[i];
-      // เล่นเสียงพิมพ์ดีด 8-bit ทุกๆ 2 ตัวอักษรเพื่อไม่ให้เสียงกวนกันเกินไป
-      if (i % 2 === 0) {
-        this.playTypewriterBeep();
-        this.currentAiFace = this.currentAiFace === this.FACES.talking ? " [ O   O ] \n   \\_O_/   " : this.FACES.talking;
-      }
-      await new Promise(resolve => setTimeout(resolve, 30)); // หน่วงเวลา 30ms ต่อ 1 ตัวอักษร
-      this.scrollToBottom(); // เลื่อนจอตามอัตโนมัติขณะกำลังพิมพ์
-    }
+    this.scrollToBottom();
     this.currentAiFace = this.FACES.idle;
     this.isProcessing = false;
   }
@@ -1618,10 +1592,17 @@ export class OperatorTabletComponent implements OnInit {
 
       // 1. ลองค้นหาแพ็กเกจเสียงภาษาไทยที่มีอยู่ในเครื่องก่อน (ทำงานออฟไลน์ได้)
       const voices = window.speechSynthesis.getVoices();
+      
+      // เอาคอมเมนต์บรรทัดล่างออก แล้วกด F12 ดูใน Console เพื่อดูว่าในเครื่องคุณมีเสียงชื่ออะไรบ้าง (เช่น 'Microsoft Premwadee', 'Google Thai Female')
+      // console.log("เสียงภาษาไทยที่มี:", voices.filter(v => v.lang.includes('th') || v.name.toLowerCase().includes('thai')));
+
       const thaiVoice = voices.find(voice => 
-        voice.lang.toLowerCase().includes('th') || 
-        voice.name.toLowerCase().includes('thai') ||
-        voice.name.includes('ไทย')
+        (voice.lang.toLowerCase().includes('th') || 
+         voice.name.toLowerCase().includes('thai') ||
+         voice.name.includes('ไทย'))
+         // && voice.name.toLowerCase().includes('female') // นำคอมเมนต์ออกเพื่อพยายามเลือกเสียงผู้หญิง (ถ้ามี)
+         // && voice.name.toLowerCase().includes('male')   // นำคอมเมนต์ออกเพื่อพยายามเลือกเสียงผู้ชาย (ถ้ามี)
+         // && voice.name.includes('Premwadee')            // หรือระบุชื่อเสียงที่ต้องการตรงๆ เช่น ของ Windows
       );
 
       if (thaiVoice) {
@@ -1630,7 +1611,7 @@ export class OperatorTabletComponent implements OnInit {
         console.warn('⚠️ ไม่พบเสียงภาษาไทยในระบบ OS ระบบจะพยายามใช้เสียงเริ่มต้นแทน');
       }
       
-      utterance.pitch = 0.5; // ปรับโทนเสียงให้ต่ำลง ดูห้าว/เป็นหุ่นยนต์เก่าๆ
+      utterance.pitch = 1.0; // ปรับโทนเสียงให้เป็นธรรมชาติและนุ่มนวลขึ้น
       utterance.rate = 1.1; // ความเร็วการพูด
       window.speechSynthesis.speak(utterance);
     }
@@ -1670,30 +1651,6 @@ export class OperatorTabletComponent implements OnInit {
       osc.stop(ctx.currentTime + 0.3);
     } catch (e) {
       console.error('Web Audio API Error:', e);
-    }
-  }
-
-  // ระบบเสียงเอฟเฟกต์ตอนตัวอักษรกำลังพิมพ์
-  playTypewriterBeep() {
-    try {
-      const ctx = this.getAudioContext();
-      if (!ctx) return;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      
-      osc.type = 'triangle'; // คลื่นเสียงแหลมสั้นๆ
-      osc.frequency.setValueAtTime(600 + Math.random() * 200, ctx.currentTime); // สุ่มโทนเสียงเล็กน้อย
-      
-      gain.gain.setValueAtTime(0.01, ctx.currentTime); // เสียงเบาๆ คลอเป็นพื้นหลัง
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05); // เล่นสั้นๆ 0.05 วินาที
-      
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      
-      osc.start();
-      osc.stop(ctx.currentTime + 0.05);
-    } catch (e) {
-      // ปล่อยผ่านถ้าบราวเซอร์ไม่รองรับ
     }
   }
 

@@ -1,0 +1,23 @@
+<div class="settings-container">
+  <h2>การตั้งค่า</h2>
+
+  <div class="setting-item">
+    <label for="theme-select">ธีม:</label>
+    <select id="theme-select" [(ngModel)]="selectedTheme">
+      <option value="light">สว่าง</option>
+      <option value="dark">มืด</option>
+    </select>
+  </div>
+
+  <div class="setting-item">
+    <label for="language-select">ภาษา:</label>
+    <select id="language-select" [(ngModel)]="selectedLanguage">
+      <option value="th">ไทย</option>
+      <option value="en">English</option>
+    </select>
+  </div>
+
+  <div class="settings-actions">
+    <button class="save-button" (click)="saveSettings()">บันทึก</button>
+  </div>
+</div>
